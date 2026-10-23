@@ -14,21 +14,20 @@
 
 ## What it's for
 
-GlanceCaps puts useful stuff in the island at the top of your screen. Charging speed, battery temperature, steps, Wi-Fi and Bluetooth changes, live match scores, weather, and weather alerts all show up there, so you don't have to open an app to check them.
+GlanceCaps puts useful information on your screen, seemingly integrate with the android system for a native OS experience, so you don't have to open any app to check them.
 
-It's built for Xiaomi phones on HyperOS 3, where it uses the native island. On other Android phones it falls back to Live Update notifications, which look plainer but do the same job.
+It's built for Xiaomi phones on HyperOS 3.3 and above, using Xiaomi Own HyperIsland. On other Android OS, the app uses Android Live Update notifications introduced in Android 16, which look plainer but do the same job.
 
 ## Modules
 
 | Module | What it does |
 |---|---|
-| Charging | Shows watts, percentage and time left while charging |
+| Charging | Shows watts input, percentage and time till 100% while charging |
 | Temperature | Battery temperature, can merge into the charging island |
-| Steps | Step count, goal progress, and an optional goal pop |
-| Connectivity | Wi-Fi, Bluetooth and airplane mode changes |
+| Steps | Step count with proper goal progress, with lots of customization choices |
+| Connectivity | Wi-Fi, Bluetooth and Airplane mode changes, just like DND or Slient Mode |
 | Matchday | Live scores for a match you pick, from a short list of leagues |
-| Weather | Current conditions and temperature from a source you choose |
-| Weather alerts | Cyclones, floods, earthquakes and official warnings near your city |
+| Weather | Current conditions, temperature and weather alerts of your city from public weather sources |
 
 ## Screenshots
 
@@ -57,23 +56,14 @@ It's built for Xiaomi phones on HyperOS 3, where it uses the native island. On o
 4. On Xiaomi phones, allow the island permission and turn on autostart. Without autostart, HyperOS kills the service in the background.
 5. Turn on the modules you want from the **Modules** tab. Some ask for permissions the first time, like activity recognition for steps or location for weather.
 
-There are two builds. **GlanceCaps** is the normal one. **GlanceCaps Miuix** has the MiuiX look and blur options. They have different package names, so you can have both installed.
+## OS Support
 
-## Requirements
-
-| | Android version | Phone |
-|---|---|---|
-| Minimum | Android 10 (API 29) | Any Android phone. Uses Live Update notifications. |
-| Recommended | HyperOS 3 or newer | Xiaomi, Redmi or POCO for the full island |
-
-Tested and supported systems:
-
-| System | Status |
+| Android OS | Tested/Support |
 |---|---|
-| HyperOS 3+ | Recommended, the main target |
+| HyperOS 3.3+ | Recommended for full native experience |
 | ColorOS 16 | Officially Tested |
-| OneUI 8 | Supported |
-| PixelUI 16 | Supported |
+| OneUI 8 | Supported??? |
+| PixelUI 16 | Supported??? |
 
 ## API keys
 
@@ -82,11 +72,11 @@ Most sources work without a key. A few don't:
 - **AccuWeather, OpenWeatherMap, WeatherAPI.com**: paste your own key in the field under the weather source picker.
 - **API-Football** (Matchday): paste your own free key from api-football.com.
 
-Keys are saved on your phone only. They're never sent anywhere except to the service they belong to.
+Keys are saved locally. They're never sent anywhere except to the service they belong to. (why would i want your api keys anyway?)
 
 ## Build from source
 
-The whole project is here, so you can check exactly what the app does before you install it.
+The whole project is here, so you can check exactly what the app does before you install it. (if u scared theres virus)
 
 ```
 git clone https://github.com/ZTHDang9535/GlanceCaps.git
@@ -94,11 +84,9 @@ cd GlanceCaps
 ./gradlew assembleNormalDebug
 ```
 
-For the MiuiX build, run `./gradlew assembleMiuixDebug`. You need JDK 17 and the Android SDK. The APKs end up in `app/build/outputs/apk/`. CI builds both on every push, so you can also grab the artifacts from the Actions tab.
-
 ## Limitations
 
-- **Island padding on HyperOS**: Auto Island Padding is an estimate, and the island can still look a bit off on some layouts. Turning it off gives you a length slider to fix it by hand.
+- **Island padding on HyperOS**: I do not know how Xiaomi implement their island padding but it definitely works weirder than expected, you can change the padding yourself in the module settings instead!
 - **Some sources might not work**: free data sources change or go down without warning. If a weather or match source shows nothing, try another one from the dropdown.
 - **Matchday coverage** varies by league and source. API-Football is the most complete.
 - **Weather alerts** use global feeds, so local warnings from some countries may not show up.
@@ -122,9 +110,7 @@ For the MiuiX build, run `./gradlew assembleMiuixDebug`. You need JDK 17 and the
 - [API-Football](https://www.api-football.com), [TheSportsDB](https://www.thesportsdb.com), [ESPN](https://www.espn.com) and [SofaScore](https://www.sofascore.com) endpoints for match data
 
 **Reference**
-- [HyperIsland-ToolKit](https://github.com/D4vidDf/HyperIsland-ToolKit) by D4vidDf, Apache 2.0, used as a reference for the island format. No code is copied.
-
-Full notices are in [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
+- [HyperIsland-ToolKit](https://github.com/D4vidDf/HyperIsland-ToolKit) by D4vidDf, Apache 2.0 (huge thanks to this legend!)
 
 **Special thanks** to everyone who tested early builds and reported what broke. You found the bugs I couldn't see from here.
 
