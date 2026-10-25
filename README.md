@@ -116,7 +116,13 @@ cd GlanceCaps
 
 ## Support
 
-If GlanceCaps is useful to you and you want to buy me a coffee, you can send a donation through MoMo or a Vietnamese bank with the QR codes below. Totally optional, and thank you either way.
+If GlanceCaps is useful to you and you want to buy me a coffee, you can send a donation through MoMo or a Vietnamese bank with the QR codes below or join the Discord Server. Totally optional, and thank you either way.
+
+<p align="center">
+  <a href="https://discord.gg/yMnYcrz2mY">
+    <img src="https://img.shields.io/badge/Discord-Join%20the%20server-5865F2?style=for-the-badge&logo=discord&logoColor=white" alt="Join the Discord server" />
+  </a>
+</p>
 
 <p align="center">
   <img src="docs/donate/momo.jpg" width="240" alt="MoMo QR" />
