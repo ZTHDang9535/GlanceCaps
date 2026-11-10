@@ -6,7 +6,7 @@
 <p align="center"><em>Everything important, at a glance.</em></p>
 
 <p align="center">
-  <img src="https://img.shields.io/badge/version-1.1.0-blue?style=flat-square" alt="Version" />
+  <img src="https://img.shields.io/badge/version-1.1.1-blue?style=flat-square" alt="Version" />
   <img src="https://img.shields.io/badge/language-Kotlin-7F52FF?style=flat-square&logo=kotlin&logoColor=white" alt="Kotlin" />
   <img src="https://img.shields.io/github/stars/ZTHDang9535/GlanceCaps?style=flat-square" alt="Stars" />
   <img src="https://img.shields.io/github/forks/ZTHDang9535/GlanceCaps?style=flat-square" alt="Forks" />
@@ -28,6 +28,8 @@ It's built for Xiaomi phones on HyperOS 3.3 and above, using Xiaomi Own HyperIsl
 | Connectivity | Wi-Fi, Bluetooth and Airplane mode changes, just like DND or Slient Mode |
 | Matchday | Live scores for a match you pick, from a short list of leagues |
 | Weather | Current conditions, temperature and weather alerts of your city from public weather sources |
+| Calls | Turn every calling app into a Mi Dialer styled island, with 90% accuracy compared to the original Mi Dialer looks|
+| Pinned Island | Add a permanent island like on iOS, with customization freely for amazing homescreen setups (u should post some in my discord, links below this repo)|
 
 ## Screenshots
 
