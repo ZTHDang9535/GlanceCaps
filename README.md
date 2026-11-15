@@ -117,7 +117,6 @@ cd GlanceCaps
 
 **Special thanks** to everyone who tested early builds and reported what broke. You found the bugs I couldn't see from here.
 
-**Contributers**
 ## Contributors
 
 <table>
