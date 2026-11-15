@@ -6,10 +6,11 @@
 <p align="center"><em>Everything important, at a glance.</em></p>
 
 <p align="center">
-  <img src="https://img.shields.io/badge/version-1.1.1-blue?style=flat-square" alt="Version" />
+  <img src="https://img.shields.io/github/v/release/ZTHDang9535/GlanceCaps?style=flat-square&label=version&color=blue" alt="Version" />
   <img src="https://img.shields.io/badge/language-Kotlin-7F52FF?style=flat-square&logo=kotlin&logoColor=white" alt="Kotlin" />
   <img src="https://img.shields.io/github/stars/ZTHDang9535/GlanceCaps?style=flat-square" alt="Stars" />
   <img src="https://img.shields.io/github/forks/ZTHDang9535/GlanceCaps?style=flat-square" alt="Forks" />
+  <img src="https://img.shields.io/github/downloads/ZTHDang9535/GlanceCaps/total?style=flat-square&color=brightgreen" alt="Downloads" />
 </p>
 
 ## What it's for
