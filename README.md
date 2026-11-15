@@ -117,6 +117,21 @@ cd GlanceCaps
 
 **Special thanks** to everyone who tested early builds and reported what broke. You found the bugs I couldn't see from here.
 
+**Contributers**
+## Contributors
+
+<table>
+  <tr>
+    <td align="center">
+      <a href="https://discord.com/users/613210299440431105">
+        <img src="app/src/main/assets/contributor_613210299440431105.png" width="64" alt="Benyamin" /><br />
+        <sub><b>Benyamin</b></sub>
+      </a><br />
+      <sub>Spanish translation</sub>
+    </td>
+  </tr>
+</table>
+
 ## Support
 
 If GlanceCaps is useful to you and you want to buy me a coffee, you can send a donation through MoMo or a Vietnamese bank with the QR codes below or join the Discord Server. Totally optional, and thank you either way.
