@@ -1,5 +1,14 @@
 package com.dang.glancecaps.ui
 
+import com.dang.glancecaps.island.CallPlaceholderStore
+import com.dang.glancecaps.island.PinnedIconStore
+import androidx.compose.ui.draw.clip
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.border
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ColumnScope
@@ -15,10 +24,11 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Slider
 import androidx.compose.material3.TextButton
-import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.ui.unit.sp
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -29,6 +39,14 @@ import kotlinx.coroutines.withContext
 import kotlinx.coroutines.Dispatchers
 import androidx.compose.ui.draw.alpha
 import androidx.compose.runtime.LaunchedEffect
+import kotlinx.coroutines.delay
+import androidx.activity.compose.BackHandler
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material3.OutlinedTextField
+import com.dang.glancecaps.call.CallApp
+import com.dang.glancecaps.call.CallApps
+import com.dang.glancecaps.call.CallTracker
+import com.dang.glancecaps.call.CallAccess
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.ui.Modifier
@@ -221,7 +239,6 @@ fun StepsPage(
                         if (n != goal) {
                             goal = n
                             prefs.stepGoal = n
-                            Haptics.tick(view)
                             bump()
                         }
                     },
@@ -308,6 +325,9 @@ fun ConnectivityPage(
     val wallpaper = rememberWallpaper()
     var seconds by remember { mutableStateOf(prefs.connSeconds) }
     val missing = ConnectivityMonitor.missingPermissions(ctx).isNotEmpty()
+    val backgroundLocation = androidx.core.content.ContextCompat.checkSelfPermission(
+        ctx, android.Manifest.permission.ACCESS_BACKGROUND_LOCATION
+    ) == android.content.pm.PackageManager.PERMISSION_GRANTED
 
     PageScaffold("Connectivity", onBack) {
         PreviewStage(wallpaper) { ConnectivityPreview(prefs, rev) }
@@ -331,6 +351,15 @@ fun ConnectivityPage(
                 RowDivider()
                 RowItem(icon = null, title = "Permissions", subtitle = "Location and nearby devices") {
                     TextButton(onClick = { Haptics.tick(view); onAllow() }) { Text("Allow") }
+                }
+            } else if (prefs.connShowNames && !backgroundLocation) {
+                RowDivider()
+                RowItem(
+                    icon = null,
+                    title = "Names while the app is closed",
+                    subtitle = "Set location to Allow all the time"
+                ) {
+                    TextButton(onClick = { Haptics.tick(view); IslandSupport.openAppInfo(ctx) }) { Text("Open") }
                 }
             }
         }
@@ -369,6 +398,447 @@ fun ConnectivityPage(
         }
 
         OtherModules(4)
+    }
+}
+
+@Composable
+fun CallsPage(
+    prefs: ModulePrefs,
+    onBack: () -> Unit,
+    onChanged: () -> Unit,
+) {
+    val ctx = LocalContext.current
+    val view = LocalView.current
+    var rev by remember { mutableStateOf(0) }
+    val bump: () -> Unit = { rev++; onChanged() }
+    val wallpaper = rememberWallpaper()
+    var granted by remember { mutableStateOf(CallAccess.granted(ctx)) }
+    var showApps by remember { mutableStateOf(false) }
+    val offCount = prefs.callAppOffSet().size
+    var btn by remember { mutableIntStateOf(0) }
+    var cAnswer by remember { mutableStateOf(prefs.callColorAnswer) }
+    var cEnd by remember { mutableStateOf(prefs.callColorEnd) }
+    var cSpeaker by remember { mutableStateOf(prefs.callColorSpeaker) }
+    var cSpeakerOn by remember { mutableStateOf(prefs.callColorSpeakerOn) }
+    var inText by remember { mutableStateOf(prefs.callTextIncoming) }
+    var outText by remember { mutableStateOf(prefs.callTextOutgoing) }
+    var showAvatar by remember { mutableStateOf(prefs.callShowAvatar) }
+    var phMode by remember { mutableIntStateOf(prefs.callPlaceholderMode) }
+    var phColor by remember { mutableStateOf(prefs.callPlaceholderColor) }
+    val pickPlaceholder = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri ->
+        if (uri != null && CallPlaceholderStore.saveFrom(ctx, uri)) {
+            prefs.callPlaceholderMode = 2
+            phMode = 2
+            Haptics.confirm(view)
+            rev++
+        }
+    }
+    LaunchedEffect(Unit) {
+        while (true) {
+            granted = CallAccess.granted(ctx)
+            delay(1000L)
+        }
+    }
+
+    if (showApps) {
+        BackHandler { showApps = false }
+        CallAppsPage(prefs, onBack = { showApps = false }, onChanged = bump)
+        return
+    }
+
+    PageScaffold("Calls", onBack) {
+        PreviewStage(wallpaper) { CallPreview(prefs, rev) }
+
+        GroupLabel("Access")
+        Group {
+            RowItem(
+                icon = R.drawable.ic_lock,
+                title = "Notification access",
+                subtitle = if (granted) "Allowed" else "Needed to detect calls",
+                onClick = { Haptics.tick(view); CallAccess.openSettings(ctx) }
+            ) {
+                Text(if (granted) "Manage" else "Allow", color = MaterialTheme.colorScheme.primary)
+            }
+        }
+
+        GroupLabel("Island")
+        Group {
+            ToggleRow(
+                "Call buttons", "Speaker, hang up, answer and decline buttons on the expanded island",
+                { prefs.callButtons }, { prefs.callButtons = it }, bump
+            )
+        }
+
+        GroupLabel("Buttons")
+        Group {
+            SegmentedControl(
+                options = listOf("Answer", "End", "Speaker", "Speaker on"),
+                selected = btn,
+                onSelect = { btn = it },
+                title = "Button colour"
+            )
+            val shown = when (btn) {
+                0 -> cAnswer
+                1 -> cEnd
+                2 -> cSpeaker
+                else -> cSpeakerOn
+            }
+            ColorSwatches(shown) { hex ->
+                when (btn) {
+                    0 -> { cAnswer = hex; prefs.callColorAnswer = hex }
+                    1 -> { cEnd = hex; prefs.callColorEnd = hex }
+                    2 -> { cSpeaker = hex; prefs.callColorSpeaker = hex }
+                    else -> { cSpeakerOn = hex; prefs.callColorSpeakerOn = hex }
+                }
+                bump()
+            }
+        }
+
+        GroupLabel("Text")
+        Group {
+            OutlinedTextField(
+                value = inText,
+                onValueChange = {
+                    inText = it.take(16)
+                    prefs.callTextIncoming = inText
+                    rev++
+                },
+                singleLine = true,
+                label = { Text("Incoming call text") },
+                placeholder = { Text("Incoming call") },
+                shape = RoundedCornerShape(20.dp),
+                modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 10.dp)
+            )
+            OutlinedTextField(
+                value = outText,
+                onValueChange = {
+                    outText = it.take(16)
+                    prefs.callTextOutgoing = outText
+                    rev++
+                },
+                singleLine = true,
+                label = { Text("Calling text") },
+                placeholder = { Text("Calling...") },
+                shape = RoundedCornerShape(20.dp),
+                modifier = Modifier.fillMaxWidth().padding(start = 16.dp, end = 16.dp, bottom = 14.dp)
+            )
+        }
+
+        GroupLabel("Profile picture")
+        Group {
+            ToggleRow(
+                "Show profile pictures", "Uses the caller's photo when the call app provides one",
+                { prefs.callShowAvatar }, { prefs.callShowAvatar = it },
+                { showAvatar = prefs.callShowAvatar; bump() }
+            )
+            if (showAvatar) {
+                RowDivider()
+                SegmentedControl(
+                    options = listOf("Initial", "Icon", "Image"),
+                    selected = phMode,
+                    onSelect = { mode ->
+                        if (mode == 2 && !CallPlaceholderStore.has(ctx)) {
+                            pickPlaceholder.launch("image/*")
+                        } else {
+                            phMode = mode
+                            prefs.callPlaceholderMode = mode
+                            bump()
+                        }
+                    },
+                    title = "When there is no photo"
+                )
+                RowDivider()
+                if (phMode == 2) {
+                    RowItem(
+                        icon = null,
+                        title = "Choose a different image",
+                        subtitle = null,
+                        onClick = { Haptics.tick(view); pickPlaceholder.launch("image/*") }
+                    )
+                } else {
+                    Text(
+                        "Placeholder colour",
+                        modifier = Modifier.padding(start = 16.dp, top = 12.dp),
+                        fontSize = 14.sp,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    ColorSwatches(phColor) {
+                        phColor = it
+                        prefs.callPlaceholderColor = it
+                        bump()
+                    }
+                }
+            }
+        }
+
+        GroupLabel("Apps")
+        Group {
+            RowItem(
+                icon = R.drawable.ic_grid_view,
+                title = "Apps",
+                subtitle = if (offCount == 0) "All apps" else "$offCount apps off",
+                onClick = { Haptics.tick(view); showApps = true }
+            )
+            RowDivider()
+            ToggleRow(
+                "Phone app", "Also show for the Phone app, which already has its own island",
+                { prefs.callPhoneApp }, { prefs.callPhoneApp = it }, bump
+            )
+        }
+
+        OtherModules(8)
+    }
+}
+
+@Composable
+private fun CallAppsPage(prefs: ModulePrefs, onBack: () -> Unit, onChanged: () -> Unit) {
+    val ctx = LocalContext.current
+    var apps by remember { mutableStateOf<List<CallApp>?>(null) }
+    var off by remember { mutableStateOf(prefs.callAppOffSet()) }
+    var query by remember { mutableStateOf("") }
+    LaunchedEffect(Unit) { apps = withContext(Dispatchers.Default) { CallApps.load(ctx) } }
+
+    PageScaffold("Apps", onBack) {
+        OutlinedTextField(
+            value = query,
+            onValueChange = { query = it },
+            singleLine = true,
+            placeholder = { Text("Search apps") },
+            shape = RoundedCornerShape(24.dp),
+            modifier = Modifier.fillMaxWidth()
+        )
+        val list = apps
+        if (list == null) {
+            Text("Loading...", color = MaterialTheme.colorScheme.onSurfaceVariant)
+        } else {
+            val shown = list.filter { query.isBlank() || it.label.contains(query, ignoreCase = true) }
+            val groups = listOf("Suggested" to shown.filter { it.suggested }, "Other apps" to shown.filter { !it.suggested })
+            for ((label, items) in groups) {
+                if (items.isEmpty()) continue
+                GroupLabel(label)
+                Group {
+                    items.forEachIndexed { i, app ->
+                        if (i > 0) RowDivider()
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(horizontal = 16.dp, vertical = 10.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            GlyphIcon(app.icon, 40.dp)
+                            androidx.compose.material3.Text(
+                                app.label,
+                                modifier = Modifier.weight(1f).padding(horizontal = 14.dp),
+                                maxLines = 1,
+                                style = MaterialTheme.typography.bodyLarge
+                            )
+                            HSwitch(app.pkg !in off) { on ->
+                                prefs.setCallApp(app.pkg, on)
+                                off = prefs.callAppOffSet()
+                                if (!on && CallTracker.current?.pkg == app.pkg) CallTracker.end(ctx)
+                                onChanged()
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+fun PinnedPage(
+    prefs: ModulePrefs,
+    onBack: () -> Unit,
+    onChanged: () -> Unit,
+) {
+    val ctx = LocalContext.current
+    val view = LocalView.current
+    var rev by remember { mutableStateOf(0) }
+    val bump: () -> Unit = { rev++; onChanged() }
+    val wallpaper = rememberWallpaper()
+    val hyper = GlanceCapsNotifications.useHyper(prefs)
+    var iconMode by remember {
+        mutableIntStateOf(if (!prefs.pinnedShowIcon) 0 else if (prefs.pinnedIconCustom) 2 else 1)
+    }
+    var tinted by remember { mutableStateOf(prefs.pinnedIconColor.isNotBlank()) }
+    var showText by remember { mutableStateOf(prefs.pinnedShowText) }
+    var textSide by remember { mutableIntStateOf(prefs.pinnedTextSide) }
+    var text by remember { mutableStateOf(prefs.pinnedText) }
+    var text2 by remember { mutableStateOf(prefs.pinnedText2) }
+    var iconColor by remember { mutableStateOf(prefs.pinnedIconColor) }
+    var granted by remember { mutableStateOf(CallAccess.granted(ctx)) }
+    LaunchedEffect(Unit) {
+        while (true) {
+            granted = CallAccess.granted(ctx)
+            delay(1000L)
+        }
+    }
+    val pick = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri ->
+        if (uri != null && PinnedIconStore.saveFrom(ctx, uri)) {
+            prefs.pinnedShowIcon = true
+            prefs.pinnedIconCustom = true
+            iconMode = 2
+            Haptics.confirm(view)
+            bump()
+        }
+    }
+
+    PageScaffold("Pinned Island", onBack) {
+        PreviewStage(wallpaper) { PinnedPreview(prefs, rev) }
+
+        GroupLabel("Icon")
+        Group {
+            SegmentedControl(
+                options = listOf("None", "App logo", "Image"),
+                selected = iconMode,
+                onSelect = { mode ->
+                    when (mode) {
+                        0 -> {
+                            prefs.pinnedShowIcon = false
+                            iconMode = 0
+                            bump()
+                        }
+                        1 -> {
+                            prefs.pinnedShowIcon = true
+                            prefs.pinnedIconCustom = false
+                            iconMode = 1
+                            bump()
+                        }
+                        else -> {
+                            if (PinnedIconStore.has(ctx)) {
+                                prefs.pinnedShowIcon = true
+                                prefs.pinnedIconCustom = true
+                                iconMode = 2
+                                bump()
+                            } else {
+                                pick.launch("image/*")
+                            }
+                        }
+                    }
+                }
+            )
+            if (iconMode == 2) {
+                RowDivider()
+                RowItem(
+                    icon = null,
+                    title = "Choose a different image",
+                    subtitle = "A transparent PNG silhouette works best",
+                    onClick = { Haptics.tick(view); pick.launch("image/*") }
+                )
+            }
+            if (iconMode != 0) {
+                RowDivider()
+                SegmentedControl(
+                    options = listOf("Original colours", "Tinted"),
+                    selected = if (tinted) 1 else 0,
+                    onSelect = { mode ->
+                        tinted = mode == 1
+                        iconColor = if (tinted) "#000000" else ""
+                        prefs.pinnedIconColor = iconColor
+                        bump()
+                    },
+                    title = "Icon colour"
+                )
+                if (tinted) {
+                    ColorSwatches(iconColor.ifBlank { "#000000" }) {
+                        iconColor = it
+                        prefs.pinnedIconColor = it
+                        bump()
+                    }
+                    Text(
+                        "Black on the black pill makes the icon blend in.",
+                        modifier = Modifier.padding(start = 16.dp, end = 16.dp, bottom = 14.dp),
+                        fontSize = 13.sp,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+            }
+        }
+
+        GroupLabel("Text")
+        Group {
+            ToggleRow(
+                "Show text", "Leave off for an empty pill, like an iOS Dynamic Island",
+                { prefs.pinnedShowText }, { prefs.pinnedShowText = it },
+                { showText = prefs.pinnedShowText; bump() }
+            )
+            if (showText) {
+                SegmentedControl(
+                    options = listOf("Left", "Right", "Both"),
+                    selected = textSide,
+                    onSelect = { mode ->
+                        textSide = mode
+                        prefs.pinnedTextSide = mode
+                        bump()
+                    },
+                    title = "Text position"
+                )
+                OutlinedTextField(
+                    value = text,
+                    onValueChange = {
+                        text = it.take(16)
+                        prefs.pinnedText = text
+                        rev++
+                    },
+                    singleLine = true,
+                    label = { Text(if (textSide == 2) "Left text" else "Custom text") },
+                    shape = RoundedCornerShape(20.dp),
+                    modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 10.dp)
+                )
+                if (textSide == 2) {
+                    OutlinedTextField(
+                        value = text2,
+                        onValueChange = {
+                            text2 = it.take(16)
+                            prefs.pinnedText2 = text2
+                            rev++
+                        },
+                        singleLine = true,
+                        label = { Text("Right text") },
+                        shape = RoundedCornerShape(20.dp),
+                        modifier = Modifier.fillMaxWidth().padding(start = 16.dp, end = 16.dp, bottom = 14.dp)
+                    )
+                }
+            }
+        }
+
+        if (hyper) {
+            GroupLabel("Outline")
+            Group {
+                ColorSwatches(prefs.pinnedColor) { prefs.pinnedColor = it; bump() }
+            }
+        }
+
+        GroupLabel("Size")
+        Group {
+            IslandPaddingRows({ prefs.pinnedPadAuto }, { prefs.pinnedPadAuto = it }, { prefs.pinnedPadLen }, { prefs.pinnedPadLen = it }, bump)
+        }
+
+        GroupLabel("Behavior")
+        Group {
+            RowItem(
+                icon = R.drawable.ic_lock,
+                title = "Hide when other islands show",
+                subtitle = if (granted) "Active" else "Needs notification access",
+                onClick = { Haptics.tick(view); CallAccess.openSettings(ctx) }
+            ) {
+                Text(if (granted) "Manage" else "Allow", color = MaterialTheme.colorScheme.primary)
+            }
+        }
+
+        if (!hyper) {
+            GroupLabel("Note")
+            Group {
+                RowItem(
+                    icon = R.drawable.ic_error,
+                    title = "Needs Super Island",
+                    subtitle = "Pinned Island only works with HyperOS Super Island"
+                )
+            }
+        }
+
+        OtherModules(7)
     }
 }
 

@@ -9,6 +9,7 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.asPaddingValues
+import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.statusBars
 import androidx.compose.foundation.layout.Row
@@ -26,7 +27,6 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.MenuDefaults
-import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.snapshotFlow
@@ -51,8 +51,12 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.dang.glancecaps.R
+import com.dang.glancecaps.i18n.tr
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.spring
+import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.core.FastOutLinearInEasing
 import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.isSystemInDarkTheme
@@ -95,7 +99,7 @@ fun menuShape(): Shape = MenuDefaults.shape
 
 @Composable
 fun DropdownTrigger(label: String, enabled: Boolean, onClick: () -> Unit) {
-    TextButton(onClick = onClick, enabled = enabled) { Text(label + "  \u25BE") }
+    TextButton(onClick = onClick, enabled = enabled) { Text(tr(label) + "  \u25BE") }
 }
 
 @Composable
@@ -173,7 +177,24 @@ fun GlanceSlider(
     steps: Int = 0,
     modifier: Modifier = Modifier,
 ) {
-    Slider(value = value, onValueChange = onValueChange, modifier = modifier, valueRange = valueRange, steps = steps)
+    val view = LocalView.current
+    val span = valueRange.endInclusive - valueRange.start
+    val unit = if (steps > 0) span / (steps + 1) else span / 40f
+    var bucket by remember { mutableIntStateOf(((value - valueRange.start) / unit).roundToInt()) }
+    Slider(
+        value = value,
+        onValueChange = { v ->
+            val b = ((v - valueRange.start) / unit).roundToInt()
+            if (b != bucket) {
+                bucket = b
+                Haptics.tick(view)
+            }
+            onValueChange(v)
+        },
+        modifier = modifier,
+        valueRange = valueRange,
+        steps = steps
+    )
 }
 
 @Composable
@@ -227,32 +248,43 @@ fun GlanceDialog(
 
 @Composable
 fun DialogLayer() {
-    val spec = DialogHost.spec ?: return
+    val live = DialogHost.spec
+    var held by remember { mutableStateOf<DialogSpec?>(null) }
+    SideEffect { if (live != null && held !== live) held = live }
+    val spec = live ?: held ?: return
+    val visible = live != null
     val cs = MaterialTheme.colorScheme
     val gray = if (appDark()) Color(0xFF454545) else Color(0xFFE6E6E6)
-    BackHandler(onBack = spec.onCancel)
-    var shown by remember(spec) { mutableStateOf(false) }
-    LaunchedEffect(spec) { shown = true }
-    val progress by animateFloatAsState(
-        targetValue = if (shown) 1f else 0f,
-        animationSpec = spring(dampingRatio = 0.9f, stiffness = 500f),
-        label = "dialog"
-    )
+    BackHandler(enabled = visible, onBack = spec.onCancel)
+    val progress = remember { Animatable(0f) }
+    LaunchedEffect(visible) {
+        if (visible) {
+            progress.animateTo(1f, spring(dampingRatio = 0.74f, stiffness = 480f))
+        } else {
+            progress.animateTo(0f, tween(230, easing = FastOutLinearInEasing))
+            held = null
+        }
+    }
     Box(
         modifier = Modifier
             .fillMaxSize()
-            .background(Color.Black.copy(alpha = 0.45f * progress.coerceIn(0f, 1f)))
-            .clickable(interactionSource = remember { MutableInteractionSource() }, indication = null, onClick = spec.onCancel),
+            .background(Color.Black.copy(alpha = 0.45f * progress.value.coerceIn(0f, 1f)))
+            .clickable(
+                enabled = visible,
+                interactionSource = remember { MutableInteractionSource() },
+                indication = null,
+                onClick = spec.onCancel
+            ),
         contentAlignment = Alignment.BottomCenter
     ) {
         Column(
             modifier = Modifier
                 .navigationBarsPadding()
+                .imePadding()
                 .padding(start = 16.dp, end = 16.dp, bottom = 16.dp)
                 .fillMaxWidth()
                 .graphicsLayer {
-                    translationY = (1f - progress) * 140.dp.toPx()
-                    alpha = progress.coerceIn(0f, 1f)
+                    translationY = (1f - progress.value) * (size.height + 160.dp.toPx())
                 }
                 .clip(RoundedCornerShape(32.dp))
                 .background(cs.surfaceContainerHigh)

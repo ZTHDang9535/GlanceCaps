@@ -3,6 +3,8 @@ package com.dang.glancecaps
 import android.Manifest
 import android.content.pm.PackageManager
 import android.os.Build
+import android.content.Intent
+import android.net.Uri
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.BackHandler
@@ -14,6 +16,9 @@ import androidx.compose.runtime.SideEffect
 import androidx.activity.SystemBarStyle
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.Crossfade
+import androidx.compose.animation.scaleOut
+import androidx.compose.animation.scaleIn
+import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.layout.Box
 import androidx.compose.ui.unit.dp
 import androidx.compose.runtime.CompositionLocalProvider
@@ -76,11 +81,19 @@ import com.dang.glancecaps.ui.AboutScreen
 import com.dang.glancecaps.ui.AppTabBar
 import com.dang.glancecaps.ui.GlanceCapsTheme
 import com.dang.glancecaps.ui.UiState
+import com.dang.glancecaps.ui.appVersionInfo
+import com.dang.glancecaps.ui.SetupFlow
+import com.dang.glancecaps.ui.SetupMode
+import com.dang.glancecaps.ui.SetupState
 import com.dang.glancecaps.ui.appDark
 import com.dang.glancecaps.ui.LocalOpenModule
 import com.dang.glancecaps.ui.DialogLayer
 import com.dang.glancecaps.ui.ChargingPage
 import com.dang.glancecaps.ui.ConnectivityPage
+import com.dang.glancecaps.ui.GlanceDialog
+import com.dang.glancecaps.ui.PinnedPage
+import com.dang.glancecaps.ui.CallsPage
+import com.dang.glancecaps.update.UpdateChecker
 import com.dang.glancecaps.ui.MatchPage
 import com.dang.glancecaps.ui.WeatherPage
 import com.dang.glancecaps.ui.Checks
@@ -116,6 +129,13 @@ class MainActivity : ComponentActivity() {
         enableEdgeToEdge()
         val startPrefs = ModulePrefs(this)
         UiState.load(startPrefs)
+        com.dang.glancecaps.i18n.Lang.load(startPrefs)
+        val versionCode = appVersionInfo(this).first
+        SetupState.mode = when {
+            startPrefs.setupDoneVersion == 0 || !startPrefs.termsAccepted -> SetupMode.FULL
+            startPrefs.setupDoneVersion < versionCode -> SetupMode.WHATS_NEW
+            else -> null
+        }
         setContent {
             val dark = appDark()
             SideEffect {
@@ -144,6 +164,12 @@ fun App() {
     var snap by remember { mutableStateOf(BatteryReader.read(ctx)) }
     var eta by remember { mutableStateOf<Int?>(null) }
     var checks by remember { mutableStateOf(Checks(true, null, null, WallpaperStore.hasAccess())) }
+
+    var update by remember { mutableStateOf(UpdateChecker.available(ctx, prefs)) }
+    var dismissedUpdate by remember { mutableStateOf(prefs.updateDismissed) }
+    LaunchedEffect(Unit) {
+        UpdateChecker.refresh(ctx, prefs) { update = UpdateChecker.available(ctx, prefs) }
+    }
 
     var steps by remember { mutableStateOf<StepReading?>(null) }
     val stepSensor = remember { StepSensor(ctx) }
@@ -292,6 +318,16 @@ fun App() {
                     onChanged = { GlanceCapsService.sync(ctx) },
                     onAllow = askConnPermissions
                 )
+                8 -> CallsPage(
+                    prefs = prefs,
+                    onBack = { page = 0 },
+                    onChanged = { GlanceCapsService.sync(ctx) }
+                )
+                7 -> PinnedPage(
+                    prefs = prefs,
+                    onBack = { page = 0 },
+                    onChanged = { GlanceCapsService.sync(ctx) }
+                )
                 11 -> SettingsScreen(checks = checks, prefs = prefs, onIconChanged = { }, onModeChanged = { GlanceCapsService.sync(ctx) })
                 else -> AboutScreen()
             }
@@ -300,9 +336,45 @@ fun App() {
             Crossfade(targetState = screenKey, modifier = screenModifier, label = "screen") { key -> renderScreen(key) }
         }
     }
+    val setupMode = SetupState.mode
+    var lastSetupMode by remember { mutableStateOf(setupMode ?: SetupMode.FULL) }
+    LaunchedEffect(setupMode) { if (setupMode != null) lastSetupMode = setupMode }
+    AnimatedVisibility(
+        visible = setupMode != null,
+        enter = fadeIn(tween(650)) + scaleIn(tween(650), initialScale = 0.94f),
+        exit = fadeOut(tween(550)) + scaleOut(tween(550), targetScale = 1.06f)
+    ) {
+        val info = remember { appVersionInfo(ctx) }
+        SetupFlow(mode = lastSetupMode, prefs = prefs, versionName = info.second) {
+            prefs.setupDoneVersion = info.first
+            SetupState.mode = null
+        }
+    }
     val dim by animateFloatAsState(if (UiDim.count > 0) 0.55f else 0f, label = "dim")
     if (dim > 0.001f) {
         Box(Modifier.fillMaxSize().background(Color.Black.copy(alpha = dim)))
+    }
+    val pendingUpdate = update
+    if (pendingUpdate != null && setupMode == null && dismissedUpdate != pendingUpdate.version) {
+        val later: () -> Unit = {
+            prefs.updateDismissed = pendingUpdate.version
+            dismissedUpdate = pendingUpdate.version
+        }
+        GlanceDialog(
+            title = "Update available",
+            message = "GlanceCaps v${pendingUpdate.version} is available. You have v${UpdateChecker.currentVersion(ctx)}.",
+            cancelText = "Later",
+            confirmText = "Download",
+            onCancel = later,
+            onConfirm = {
+                later()
+                try {
+                    ctx.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(pendingUpdate.url)).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+                } catch (e: Throwable) {
+                    CrashLog.append(ctx, "update.open", e)
+                }
+            }
+        )
     }
     DialogLayer()
     }

@@ -15,9 +15,17 @@ object CrashLog {
 
     private fun file(ctx: Context) = File(ctx.applicationContext.filesDir, FILE)
 
+    private val lastLogged = HashMap<String, Long>()
+
     @Synchronized
     fun append(ctx: Context, tag: String, t: Throwable?) {
         try {
+            val nowMs = System.currentTimeMillis()
+            if (!tag.startsWith("CRASH")) {
+                val prev = lastLogged[tag]
+                if (prev != null && nowMs - prev < 120_000L) return
+                lastLogged[tag] = nowMs
+            }
             val sw = StringWriter()
             t?.let { it.printStackTrace(PrintWriter(sw)) }
             val stamp = SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.US).format(Date())

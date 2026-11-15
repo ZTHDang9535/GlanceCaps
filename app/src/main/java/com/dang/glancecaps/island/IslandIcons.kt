@@ -46,6 +46,36 @@ object IslandIcons {
         return Color.rgb(r, g, b)
     }
 
+    fun button(ctx: Context, res: Int, bg: Int, size: Int = 192): Bitmap =
+        cached("b-$res-$bg-$size") {
+            val bmp = Bitmap.createBitmap(size, size, Bitmap.Config.ARGB_8888)
+            val c = Canvas(bmp)
+            val paint = Paint(Paint.ANTI_ALIAS_FLAG)
+            paint.color = bg
+            c.drawCircle(size / 2f, size / 2f, size / 2f, paint)
+            val d = ContextCompat.getDrawable(ctx, res)?.mutate()
+            if (d != null) {
+                val inset = (size * 0.27f).toInt()
+                d.setBounds(inset, inset, size - inset, size - inset)
+                d.setTint(Color.WHITE)
+                d.draw(c)
+            }
+            bmp
+        }
+
+    fun flat(ctx: Context, res: Int, color: Int, size: Int = 128): Bitmap =
+        cached("f-$res-$color-$size") {
+            val bmp = Bitmap.createBitmap(size, size, Bitmap.Config.ARGB_8888)
+            val c = Canvas(bmp)
+            val d = ContextCompat.getDrawable(ctx, res)?.mutate()
+            if (d != null) {
+                d.setBounds(0, 0, size, size)
+                d.setTint(color)
+                d.draw(c)
+            }
+            bmp
+        }
+
     fun glyph(ctx: Context, kind: Kind, top: Int, bottom: Int, size: Int = 192): Bitmap =
         cached("g-$kind-$top-$bottom-$size") {
             val res = when (kind) {

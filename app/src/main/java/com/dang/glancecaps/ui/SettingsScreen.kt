@@ -3,6 +3,7 @@ package com.dang.glancecaps.ui
 import androidx.activity.compose.BackHandler
 import androidx.annotation.DrawableRes
 import androidx.compose.animation.AnimatedContent
+import com.dang.glancecaps.island.ShizukuWorkaround
 import kotlinx.coroutines.delay
 import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableIntStateOf
@@ -47,7 +48,6 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Switch
-import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -67,6 +67,8 @@ import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.unit.dp
 import com.dang.glancecaps.R
+import com.dang.glancecaps.i18n.Lang
+import com.dang.glancecaps.i18n.tr
 import com.dang.glancecaps.CrashLog
 import com.dang.glancecaps.data.ModulePrefs
 import com.dang.glancecaps.island.IconStore
@@ -74,6 +76,8 @@ import com.dang.glancecaps.island.GlanceCapsNotifications
 import com.dang.glancecaps.island.IslandSupport
 import com.dang.glancecaps.island.LiveUpdates
 import com.dang.glancecaps.island.WallpaperStore
+import com.dang.glancecaps.update.CheckResult
+import com.dang.glancecaps.update.UpdateChecker
 
 data class Checks(
     val notifications: Boolean,
@@ -202,7 +206,7 @@ private fun CategoryRow(@DrawableRes icon: Int, tile: Color, title: String, valu
 }
 
 @Composable
-private fun ThemeTile(dark: Boolean, selected: Boolean, label: String, modifier: Modifier, onClick: () -> Unit) {
+internal fun ThemeTile(dark: Boolean, selected: Boolean, label: String, modifier: Modifier, onClick: () -> Unit) {
     val cs = MaterialTheme.colorScheme
     val card = if (dark) Color(0xFF2B4FB8).copy(alpha = 0.75f) else Color.White.copy(alpha = 0.3f)
     val lineStrong = if (dark) Color.White.copy(alpha = 0.55f) else Color(0xFF3A63D6)
@@ -270,6 +274,17 @@ private fun AppearancePage(prefs: ModulePrefs, onBack: () -> Unit) {
         ) {
             ThemeTile(false, !darkNow, "Light mode", Modifier.weight(1f)) { setMode("light") }
             ThemeTile(true, darkNow, "Dark mode", Modifier.weight(1f)) { setMode("dark") }
+        }
+        Group {
+            ChoiceRow(
+                title = "Language",
+                subtitle = null,
+                options = listOf(Lang.SYSTEM to "System default", Lang.EN to "English", Lang.VI to "Tiếng Việt", Lang.ES to "Español (Latinoamérica)"),
+                selected = Lang.setting
+            ) { key ->
+                Lang.setting = key
+                prefs.language = key
+            }
         }
         Group {
             RowItem(
@@ -365,6 +380,63 @@ private fun IslandPage(prefs: ModulePrefs, onModeChanged: () -> Unit, onBack: ()
                 }
             }
         }
+        if (GlanceCapsNotifications.isXiaomiFamily()) {
+            GroupLabel("China ROM")
+            Group { ShizukuRows(prefs) }
+        }
+    }
+}
+
+@Composable
+private fun ShizukuRows(prefs: ModulePrefs) {
+    val ctx = LocalContext.current
+    val view = LocalView.current
+    var enabled by remember { mutableStateOf(prefs.shizukuWorkaround) }
+    var state by remember { mutableIntStateOf(ShizukuWorkaround.state()) }
+    var unsupported by remember { mutableStateOf(prefs.xmsfUnsupported) }
+    LaunchedEffect(Unit) {
+        while (true) {
+            state = ShizukuWorkaround.state()
+            unsupported = prefs.xmsfUnsupported
+            delay(1500)
+        }
+    }
+    ToggleRow(
+        "Shizuku workaround", null,
+        { prefs.shizukuWorkaround },
+        { prefs.shizukuWorkaround = it; if (it) prefs.xmsfUnsupported = false },
+        { enabled = prefs.shizukuWorkaround; unsupported = prefs.xmsfUnsupported }
+    )
+    if (enabled) {
+        RowDivider()
+        when (state) {
+            ShizukuWorkaround.READY -> RowItem(
+                icon = null, title = "Shizuku",
+                subtitle = if (unsupported) "Not supported on this ROM" else "Ready"
+            ) {
+                TextButton(onClick = {
+                    Haptics.tick(view)
+                    if (unsupported) {
+                        prefs.xmsfUnsupported = false
+                        unsupported = false
+                    } else {
+                        Thread {
+                            if (ShizukuWorkaround.restoreAll(ctx)) prefs.xmsfPending = false
+                        }.start()
+                    }
+                }) { Text(if (unsupported) "Retry" else "Restore services") }
+            }
+            ShizukuWorkaround.NEEDS_PERMISSION -> RowItem(icon = null, title = "Shizuku", subtitle = "Permission needed") {
+                TextButton(onClick = { Haptics.tick(view); ShizukuWorkaround.requestPermission() }) { Text("Grant") }
+            }
+            else -> RowItem(icon = null, title = "Shizuku", subtitle = "Not running") {
+                TextButton(onClick = {
+                    Haptics.tick(view)
+                    val launch = ctx.packageManager.getLaunchIntentForPackage("moe.shizuku.privileged.api")
+                    if (launch != null) ctx.startActivity(launch) else Toast.makeText(ctx, tr("Install Shizuku first"), Toast.LENGTH_SHORT).show()
+                }) { Text("Open") }
+            }
+        }
     }
 }
 
@@ -436,6 +508,79 @@ private fun CustomizePage(checks: Checks, prefs: ModulePrefs, onIconChanged: () 
 }
 
 @Composable
+private fun UpdatesPage(prefs: ModulePrefs, onChanged: () -> Unit, onBack: () -> Unit) {
+    val ctx = LocalContext.current
+    val view = LocalView.current
+    val wallpaper = rememberWallpaper()
+    val current = remember { UpdateChecker.currentVersion(ctx) }
+    var enabled by remember { mutableStateOf(prefs.updateCheck) }
+    var found by remember { mutableStateOf(UpdateChecker.available(ctx, prefs)) }
+    var checking by remember { mutableStateOf(false) }
+    var message by remember { mutableStateOf<String?>(null) }
+    val status = when {
+        checking -> "Checking..."
+        message != null -> message
+        found != null -> "A new version is available"
+        else -> null
+    }
+    ScreenFrame(title = "Updates", spacing = 14.dp, onBack = onBack) {
+        PreviewStage(wallpaper) { UpdatePreview(found?.version ?: current) }
+        Group {
+            ToggleRow(
+                "Check for updates", "Looks for new versions on GitHub",
+                { prefs.updateCheck }, { prefs.updateCheck = it },
+                { enabled = prefs.updateCheck; found = UpdateChecker.available(ctx, prefs); onChanged() }
+            )
+            RowDivider()
+            ToggleRow(
+                "Show on island", "Announce new versions on the island",
+                { prefs.updateIsland }, { prefs.updateIsland = it },
+                lockedReason = if (enabled) null else "Turn on update checks first"
+            )
+        }
+        Group {
+            RowItem(icon = null, title = "Installed version", subtitle = "v$current")
+            if (enabled) {
+                RowDivider()
+                RowItem(
+                    icon = null,
+                    title = found?.let { "v" + it.version } ?: "Check now",
+                    subtitle = status,
+                    onClick = {
+                        Haptics.tick(view)
+                        val f = found
+                        if (f != null) {
+                            try {
+                                ctx.startActivity(
+                                    android.content.Intent(android.content.Intent.ACTION_VIEW, android.net.Uri.parse(f.url))
+                                        .addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
+                                )
+                            } catch (e: Throwable) {
+                                CrashLog.append(ctx, "update.open", e)
+                            }
+                        } else if (!checking) {
+                            checking = true
+                            message = null
+                            UpdateChecker.refresh(ctx, prefs, force = true) { r ->
+                                checking = false
+                                found = UpdateChecker.available(ctx, prefs)
+                                message = when (r) {
+                                    CheckResult.NEW -> "A new version is available"
+                                    CheckResult.LATEST -> "You're up to date"
+                                    CheckResult.FAILED -> "Couldn't check right now"
+                                }
+                            }
+                        }
+                    }
+                ) {
+                    Text(if (found != null) "Download" else "Check", color = MaterialTheme.colorScheme.primary)
+                }
+            }
+        }
+    }
+}
+
+@Composable
 fun SettingsScreen(checks: Checks, prefs: ModulePrefs, onIconChanged: () -> Unit, onModeChanged: () -> Unit = {}) {
     val ctx = LocalContext.current
     val view = LocalView.current
@@ -488,6 +633,7 @@ fun SettingsScreen(checks: Checks, prefs: ModulePrefs, onIconChanged: () -> Unit
             "status" -> StatusPage(checks) { sub = "" }
             "appearance" -> AppearancePage(prefs) { sub = "" }
             "island" -> IslandPage(prefs, onModeChanged) { sub = "" }
+            "updates" -> UpdatesPage(prefs, onModeChanged) { sub = "" }
             "customize" -> CustomizePage(checks, prefs, onIconChanged) { sub = "" }
             "dev" -> DevScreen(prefs, onDisable = { devOn = false; sub = "" }) { sub = "" }
             else -> ScreenFrame(title = "Settings", spacing = 14.dp) {
@@ -501,8 +647,15 @@ fun SettingsScreen(checks: Checks, prefs: ModulePrefs, onIconChanged: () -> Unit
                     CategoryRow(R.drawable.ic_tune, Color(0xFF3482FF), "Appearance", themeLabel) { sub = "appearance" }
                     CategoryRow(R.drawable.ic_bolt, Color(0xFFFF9500), "Island style", islandLabel) { sub = "island" }
                     CategoryRow(R.drawable.ic_wallpaper, Color(0xFFAF52DE), "Customization", null) { sub = "customize" }
+                    CategoryRow(
+                        R.drawable.ic_download, Color(0xFF30B0C7), "Updates",
+                        UpdateChecker.available(ctx, prefs)?.let { "v" + it.version }
+                    ) { sub = "updates" }
                 }
                 Group {
+                    CategoryRow(R.drawable.ic_grid_view, Color(0xFF5856D6), "Setup guide", null) {
+                        SetupState.mode = SetupMode.FULL
+                    }
                     CategoryRow(
                         R.drawable.ic_help, Color(0xFF8E8E93), "Crash log",
                         if (logText != null) "Entries" else null
@@ -519,9 +672,9 @@ fun SettingsScreen(checks: Checks, prefs: ModulePrefs, onIconChanged: () -> Unit
                                 devOn = true
                                 taps = 0
                                 Haptics.confirm(view)
-                                Toast.makeText(ctx, "Developer options unlocked", Toast.LENGTH_SHORT).show()
+                                Toast.makeText(ctx, tr("Developer options unlocked"), Toast.LENGTH_SHORT).show()
                             } else if (taps >= 5) {
-                                Toast.makeText(ctx, "${10 - taps} more taps to unlock developer options", Toast.LENGTH_SHORT).show()
+                                Toast.makeText(ctx, tr("${10 - taps} more taps to unlock developer options"), Toast.LENGTH_SHORT).show()
                             }
                         }
                     }
@@ -559,7 +712,7 @@ fun SettingsScreen(checks: Checks, prefs: ModulePrefs, onIconChanged: () -> Unit
                 Row {
                     TextButton(onClick = {
                         CrashLog.clear(ctx); logText = null; showLog = false
-                    }) { Text("Clear") }
+                    }) { Text("Clear log") }
                     TextButton(onClick = { showLog = false }) { Text("Close") }
                 }
             }

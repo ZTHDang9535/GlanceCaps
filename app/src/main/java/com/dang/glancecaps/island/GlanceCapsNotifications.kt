@@ -1,5 +1,8 @@
 package com.dang.glancecaps.island
 
+import android.graphics.Paint
+import android.graphics.PorterDuffColorFilter
+import android.graphics.PorterDuff
 import android.app.Notification
 import android.app.NotificationChannel
 import android.app.NotificationManager
@@ -9,6 +12,10 @@ import com.dang.glancecaps.weather.WeatherCodes
 import com.dang.glancecaps.weather.Weather
 import kotlin.math.roundToInt
 import org.json.JSONArray
+import com.dang.glancecaps.call.CallActionReceiver
+import com.dang.glancecaps.call.CallAudio
+import com.dang.glancecaps.call.CallInfo
+import com.dang.glancecaps.call.CallState
 import android.content.Intent
 import android.graphics.Bitmap
 import android.graphics.Color
@@ -22,6 +29,8 @@ import com.dang.glancecaps.match.MatchInfo
 import com.dang.glancecaps.match.MatchLogos
 import com.dang.glancecaps.battery.ThermalState
 import com.dang.glancecaps.data.ModulePrefs
+import com.dang.glancecaps.i18n.Lang
+import com.dang.glancecaps.i18n.tr
 import com.dang.glancecaps.weather.WeatherAlert
 import org.json.JSONObject
 
@@ -35,11 +44,22 @@ object GlanceCapsNotifications {
     const val ID_STEPS = 1003
     const val ID_CONN = 1004
     const val ID_MATCH = 1005
+    const val ID_UPDATE = 1008
+    const val ID_PINNED = 1009
+    const val ID_CALL = 1010
 
     private const val PIC_BOLT = "miui.focus.pic_bolt"
     private const val PIC_THERMO = "miui.focus.pic_thermo"
     private const val PIC_WALK = "miui.focus.pic_walk"
     private const val PIC_BLANK = "miui.focus.pic_blank"
+    private const val PIC_APP = "miui.focus.pic_app"
+    private const val PIC_CALL = "miui.focus.pic_call"
+    private const val PIC_AVATAR = "miui.focus.pic_avatar"
+    private const val PIC_CALL_WHITE = "miui.focus.pic_call_white"
+    private const val PIC_CALL_END = "miui.focus.pic_call_end"
+    private const val PIC_SPEAKER = "miui.focus.pic_speaker"
+    private const val ACTION_CALL_A = "miui.focus.action_call_a"
+    private const val ACTION_CALL_B = "miui.focus.action_call_b"
     private const val PIC_FLAG = "miui.focus.pic_flag"
     private const val PIC_CONN = "miui.focus.pic_conn"
     private const val PIC_HOME = "miui.focus.pic_home"
@@ -100,22 +120,29 @@ object GlanceCapsNotifications {
 
     private fun paramV2(
         business: String, ticker: String, tickerPic: String, aodTitle: String,
-        island: JSONObject, base: JSONObject, cardIcon: String?, progress: JSONObject?, expand: Boolean,
+        island: JSONObject, base: JSONObject?, cardIcon: String?, progress: JSONObject?, expand: Boolean,
         hint: JSONObject? = null,
+        canFloat: Boolean = expand,
+        quiet: Boolean = false,
     ): JSONObject {
+        if (!island.has("islandTimeout")) island.put("islandTimeout", 21_600)
         val v = JSONObject()
             .put("protocol", 3)
             .put("business", business)
             .put("islandFirstFloat", expand)
-            .put("enableFloat", expand)
+            .put("enableFloat", canFloat)
             .put("updatable", true)
-            .put("isShowNotification", true)
+            .put("isShowNotification", !quiet)
             .put("ticker", ticker)
             .put("tickerPic", tickerPic)
             .put("aodTitle", aodTitle)
             .put("aodPic", tickerPic)
             .put("param_island", island)
-            .put("baseInfo", base)
+        if (base != null) v.put("baseInfo", base)
+        if (quiet) {
+            v.remove("aodTitle")
+            v.remove("aodPic")
+        }
         if (cardIcon != null) v.put("picInfo", JSONObject().put("type", 2).put("pic", cardIcon))
         if (progress != null) v.put("progressInfo", progress)
         if (hint != null) v.put("hintInfo", hint)
@@ -138,8 +165,8 @@ object GlanceCapsNotifications {
     private fun baseBuilder(ctx: Context, smallIcon: Int, title: String, text: String): Notification.Builder =
         Notification.Builder(ctx, CH_LIVE)
             .setSmallIcon(smallIcon)
-            .setContentTitle(title)
-            .setContentText(text)
+            .setContentTitle(tr(title))
+            .setContentText(tr(text))
             .setContentIntent(openApp(ctx))
             .setOnlyAlertOnce(true)
             .setOngoing(true)
@@ -148,13 +175,14 @@ object GlanceCapsNotifications {
     fun serviceNotification(ctx: Context, p: ModulePrefs): Notification {
         ensureChannels(ctx)
         val on = ArrayList<String>()
-        if (p.chargingEnabled) on.add("Charging")
-        if (p.tempEnabled) on.add("Temperature")
-        if (p.stepsEnabled) on.add("Steps")
-        if (p.connEnabled) on.add("Connectivity")
-        if (p.matchEnabled) on.add("Matchday")
-        if (p.weatherEnabled) on.add("Weather")
-        val text = if (on.isEmpty()) "No modules on" else on.joinToString(" + ")
+        if (p.chargingEnabled) on.add(tr("Charging"))
+        if (p.tempEnabled) on.add(tr("Temperature"))
+        if (p.stepsEnabled) on.add(tr("Steps"))
+        if (p.connEnabled) on.add(tr("Connectivity"))
+        if (p.matchEnabled) on.add(tr("Matchday"))
+        if (p.weatherEnabled) on.add(tr("Weather"))
+        if (p.pinnedEnabled) on.add(tr("Pinned Island"))
+        val text = if (on.isEmpty()) tr("No modules on") else on.joinToString(" + ")
         return Notification.Builder(ctx, CH_SERVICE)
             .setSmallIcon(R.drawable.ic_bolt)
             .setContentTitle(ctx.getString(R.string.app_name))
@@ -210,7 +238,7 @@ object GlanceCapsNotifications {
             progress = if (p.chgShowBar) JSONObject().put("progress", level).put("colorProgress", bar) else null,
             expand = pop
         )
-        return JSONObject().put("param_v2", v2).toString()
+        return localize(JSONObject().put("param_v2", v2).toString())
     }
 
     fun charging(
@@ -265,7 +293,7 @@ object GlanceCapsNotifications {
             progress = null,
             expand = expand
         )
-        return JSONObject().put("param_v2", v2).toString()
+        return localize(JSONObject().put("param_v2", v2).toString())
     }
 
     fun temperature(ctx: Context, s: BatterySnapshot, p: ModulePrefs, expand: Boolean): Notification {
@@ -352,7 +380,7 @@ object GlanceCapsNotifications {
             },
             expand = expand
         )
-        return JSONObject().put("param_v2", v2).toString()
+        return localize(JSONObject().put("param_v2", v2).toString())
     }
 
     fun steps(ctx: Context, steps: Int, p: ModulePrefs, expand: Boolean): Notification {
@@ -383,14 +411,17 @@ object GlanceCapsNotifications {
         ConnKind.AIRPLANE -> "Airplane mode"
     }
 
-    fun connText(kind: ConnKind, on: Boolean, detail: String?): String {
-        val state = if (on) "On" else "Off"
-        return when (kind) {
-            ConnKind.WIFI -> "Wi-Fi: " + (if (on && !detail.isNullOrBlank()) detail else state)
-            ConnKind.BLUETOOTH -> "Bluetooth: " + (if (on && !detail.isNullOrBlank()) detail else state)
-            ConnKind.AIRPLANE -> state
-        }
+    fun connName(kind: ConnKind, on: Boolean, detail: String?): String? =
+        if (kind != ConnKind.AIRPLANE && on && !detail.isNullOrBlank()) detail else null
+
+    fun connState(kind: ConnKind, on: Boolean, named: Boolean): String = when (kind) {
+        ConnKind.WIFI -> if (!on) "Wi-Fi off" else if (named) "Wi-Fi connected" else "Wi-Fi on"
+        ConnKind.BLUETOOTH -> if (!on) "Bluetooth off" else if (named) "Bluetooth connected" else "Bluetooth on"
+        ConnKind.AIRPLANE -> if (on) "Airplane mode on" else "Airplane mode off"
     }
+
+    fun connText(kind: ConnKind, on: Boolean, detail: String?): String =
+        connState(kind, on, connName(kind, on, detail) != null)
 
     fun connAccent(kind: ConnKind, on: Boolean): String = when {
         !on -> "#9AA0A6"
@@ -415,12 +446,19 @@ object GlanceCapsNotifications {
     }
 
     fun connectivityJson(kind: ConnKind, on: Boolean, detail: String?, p: ModulePrefs): String {
-        val text = connText(kind, on, detail)
+        val name = connName(kind, on, detail)
+        val state = connState(kind, on, name != null)
         val accent = connAccent(kind, on)
-        val left = JSONObject().put("type", 1).put("picInfo", pic(PIC_CONN))
-        val right = JSONObject().put("type", 2)
-            .put("textInfo", JSONObject().put("title", text).put("showHighlightColor", true))
-        val big = JSONObject().put("imageTextInfoLeft", left).put("imageTextInfoRight", right)
+        val left = JSONObject().put("type", 1)
+            .put("picInfo", pic(PIC_CONN))
+            .put("textInfo", JSONObject().put("title", state))
+        val big = JSONObject().put("imageTextInfoLeft", left)
+        if (name != null) {
+            big.put(
+                "imageTextInfoRight",
+                JSONObject().put("type", 2).put("textInfo", JSONObject().put("title", name))
+            )
+        }
         IslandPadding.apply(big, p.connPadAuto, p.connPadLen)
         val island = JSONObject()
             .put("islandProperty", 1)
@@ -429,18 +467,22 @@ object GlanceCapsNotifications {
             .put("highlightColor", accent)
             .put("bigIslandArea", big)
             .put("smallIslandArea", smallIsland(PIC_CONN, null))
-        val cardTitle = if (kind == ConnKind.AIRPLANE) connLabel(kind) else text
-        val cardContent = if (kind == ConnKind.AIRPLANE) text else connLabel(kind)
         val v2 = paramV2(
-            business = "glancecaps_connectivity", ticker = text, tickerPic = PIC_CONN, aodTitle = text,
+            business = "glancecaps_connectivity", ticker = state, tickerPic = PIC_CONN, aodTitle = state,
             island = island,
-            base = baseInfo(cardTitle, cardContent, null, accent),
+            base = baseInfo(state, name ?: connLabel(kind), null, accent),
             cardIcon = PIC_CONN,
             progress = null,
             expand = false
         )
-        return JSONObject().put("param_v2", v2).toString()
+        return localize(JSONObject().put("param_v2", v2).toString())
     }
+
+    fun connDurationMs(kind: ConnKind, on: Boolean, detail: String?, p: ModulePrefs): Long =
+        maxOf(
+            p.connSeconds.coerceIn(2, 10) * 1000L,
+            IslandMarquee.totalMs(connectivityJson(kind, on, detail, p))
+        )
 
     fun connectivity(ctx: Context, kind: ConnKind, on: Boolean, detail: String?, p: ModulePrefs): Notification {
         ensureChannels(ctx)
@@ -449,13 +491,278 @@ object GlanceCapsNotifications {
         val pics = Bundle()
         pics.putParcelable(PIC_CONN, Icon.createWithBitmap(bmp))
         pics.putParcelable(PIC_BLANK, Icon.createWithBitmap(blank))
-        val text = connText(kind, on, detail)
-        val n = baseBuilder(ctx, connRes(kind, on), text, connLabel(kind))
+        val name = connName(kind, on, detail)
+        val n = baseBuilder(ctx, connRes(kind, on), connState(kind, on, name != null), name ?: connLabel(kind))
             .setLargeIcon(Icon.createWithBitmap(bmp))
-            .setTimeoutAfter(p.connSeconds.coerceIn(2, 10) * 1000L)
+            .setTimeoutAfter(connDurationMs(kind, on, detail, p))
             .addExtras(Bundle().apply { putBundle("miui.focus.pics", pics) })
             .build()
         n.extras.putString("miui.focus.param", connectivityJson(kind, on, detail, p))
+        return n
+    }
+
+    fun appIconBitmap(ctx: Context): Bitmap {
+        IconStore.custom(ctx)?.let { return it }
+        val size = 96
+        val drawable = ctx.packageManager.getApplicationIcon(ctx.packageName)
+        val bmp = Bitmap.createBitmap(size, size, Bitmap.Config.ARGB_8888)
+        val canvas = android.graphics.Canvas(bmp)
+        drawable.setBounds(0, 0, size, size)
+        drawable.draw(canvas)
+        return bmp
+    }
+
+    private fun appPics(ctx: Context): Bundle {
+        val pics = Bundle()
+        pics.putParcelable(PIC_APP, Icon.createWithBitmap(appIconBitmap(ctx)))
+        pics.putParcelable(PIC_BLANK, Icon.createWithBitmap(blank))
+        return pics
+    }
+
+    fun updateLabel(version: String): String = "v" + version.removePrefix("v")
+
+    fun updateJson(version: String): String {
+        val label = updateLabel(version)
+        val left = JSONObject().put("type", 1).put("picInfo", pic(PIC_APP))
+        val right = JSONObject().put("type", 2).put("textInfo", JSONObject().put("title", label))
+        val big = JSONObject().put("imageTextInfoLeft", left).put("imageTextInfoRight", right)
+        val island = JSONObject()
+            .put("islandProperty", 1)
+            .put("islandPriority", 2)
+            .put("highlightColor", "#3D8BFF")
+            .put("bigIslandArea", big)
+            .put("smallIslandArea", smallIsland(PIC_APP, null))
+        val v2 = paramV2(
+            business = "glancecaps_update", ticker = "Update available", tickerPic = PIC_APP, aodTitle = label,
+            island = island,
+            base = baseInfo("Update available", "GlanceCaps $label", null, "#3D8BFF"),
+            cardIcon = PIC_APP,
+            progress = null,
+            expand = true
+        )
+        return localize(JSONObject().put("param_v2", v2).toString())
+    }
+
+    fun update(ctx: Context, version: String, p: ModulePrefs): Notification {
+        ensureChannels(ctx)
+        if (!useHyper(p)) {
+            return LiveUpdates.build(
+                ctx, openApp(ctx), R.drawable.ic_download,
+                title = "Update available", text = "GlanceCaps " + updateLabel(version),
+                shortText = updateLabel(version), progress = null,
+                accent = Color.parseColor("#3D8BFF"),
+                timeoutMs = 10_000L,
+                subText = "Update"
+            )
+        }
+        val bmp = appIconBitmap(ctx)
+        val n = baseBuilder(ctx, R.drawable.ic_download, "Update available", "GlanceCaps " + updateLabel(version))
+            .setLargeIcon(Icon.createWithBitmap(bmp))
+            .setTimeoutAfter(10_000L)
+            .addExtras(Bundle().apply { putBundle("miui.focus.pics", appPics(ctx)) })
+            .build()
+        n.extras.putString("miui.focus.param", updateJson(version))
+        return n
+    }
+
+    fun tinted(src: Bitmap, color: Int): Bitmap {
+        val out = Bitmap.createBitmap(src.width, src.height, Bitmap.Config.ARGB_8888)
+        val paint = Paint(Paint.ANTI_ALIAS_FLAG)
+        paint.colorFilter = PorterDuffColorFilter(color, PorterDuff.Mode.SRC_IN)
+        android.graphics.Canvas(out).drawBitmap(src, 0f, 0f, paint)
+        return out
+    }
+
+    fun pinnedBitmap(ctx: Context, p: ModulePrefs): Bitmap {
+        val base = (if (p.pinnedIconCustom) PinnedIconStore.bitmap(ctx) else null) ?: appIconBitmap(ctx)
+        val hex = p.pinnedIconColor.trim()
+        if (!Regex("^#[0-9A-Fa-f]{6}$").matches(hex)) return base
+        return tinted(base, Color.parseColor(hex))
+    }
+
+    private fun safeHex(value: String, fallback: String): String =
+        if (Regex("^#[0-9A-Fa-f]{6}$").matches(value.trim())) value.trim() else fallback
+
+    fun pinnedJson(p: ModulePrefs): String {
+        val showIcon = p.pinnedShowIcon
+        val icon = if (showIcon) PIC_APP else PIC_BLANK
+        val side = p.pinnedTextSide
+        val first = if (p.pinnedShowText) p.pinnedText.trim() else ""
+        val second = if (p.pinnedShowText && side == 2) p.pinnedText2.trim() else ""
+        fun textInfo(t: String) = JSONObject().put("title", t)
+        val big = JSONObject()
+        when {
+            first.isEmpty() && second.isEmpty() ->
+                big.put("imageTextInfoLeft", JSONObject().put("type", 1).put("picInfo", pic(icon)))
+            side == 0 -> {
+                big.put(
+                    "imageTextInfoLeft",
+                    JSONObject().put("type", 1).put("picInfo", pic(PIC_BLANK)).put("textInfo", textInfo(first))
+                )
+                if (showIcon) big.put("picInfo", pic(icon))
+            }
+            side == 2 -> {
+                val left = JSONObject().put("type", 1).put("picInfo", pic(icon))
+                if (first.isNotEmpty()) left.put("textInfo", textInfo(first))
+                big.put("imageTextInfoLeft", left)
+                if (second.isNotEmpty()) {
+                    big.put("imageTextInfoRight", JSONObject().put("type", 2).put("textInfo", textInfo(second)))
+                }
+            }
+            else -> {
+                big.put("imageTextInfoLeft", JSONObject().put("type", 1).put("picInfo", pic(icon)))
+                big.put("imageTextInfoRight", JSONObject().put("type", 2).put("textInfo", textInfo(first)))
+            }
+        }
+        if (side == 0 && first.isNotEmpty()) {
+            if (!p.pinnedPadAuto) {
+                big.optJSONObject("imageTextInfoLeft")?.optJSONObject("textInfo")
+                    ?.put("title", IslandPadding.center(first, p.pinnedPadLen.coerceIn(4, 40) - 3))
+            }
+        } else {
+            IslandPadding.apply(big, p.pinnedPadAuto, p.pinnedPadLen.coerceIn(4, 40))
+        }
+        val island = JSONObject()
+            .put("islandProperty", 1)
+            .put("islandPriority", 0)
+            .put("islandTimeout", 2_592_000)
+            .put("dismissIsland", false)
+            .put("highlightColor", safeHex(p.pinnedColor, "#000000"))
+            .put("bigIslandArea", big)
+            .put("smallIslandArea", smallIsland(icon, null))
+        val v2 = paramV2(
+            business = "glancecaps_pinned", ticker = "", tickerPic = icon, aodTitle = "",
+            island = island,
+            base = null,
+            cardIcon = null,
+            progress = null,
+            expand = false,
+            quiet = true
+        )
+        v2.put("timeout", 43_200)
+        return localize(JSONObject().put("param_v2", v2).toString())
+    }
+
+    fun pinnedSignature(ctx: Context, p: ModulePrefs): String =
+        pinnedJson(p) + "|" + p.islandMode + "|" + p.pinnedIconCustom + "|" + p.pinnedTextSide + "|" + p.pinnedPadAuto + "|" + p.pinnedPadLen + "|" + p.pinnedIconColor + "|" + IconStore.stamp(ctx) + "|" + PinnedIconStore.stamp(ctx)
+
+    fun pinned(ctx: Context, p: ModulePrefs): Notification {
+        ensureChannels(ctx)
+        val pics = Bundle()
+        pics.putParcelable(PIC_APP, Icon.createWithBitmap(pinnedBitmap(ctx, p)))
+        pics.putParcelable(PIC_BLANK, Icon.createWithBitmap(blank))
+        val n = baseBuilder(ctx, R.drawable.ic_pin, "", "")
+            .setVisibility(Notification.VISIBILITY_SECRET)
+            .setShowWhen(false)
+            .setAutoCancel(false)
+            .addExtras(Bundle().apply { putBundle("miui.focus.pics", pics) })
+            .build()
+        n.contentIntent = null
+        n.extras.putString("miui.focus.param", pinnedJson(p))
+        return n
+    }
+
+    private class CallButton(val key: String, val pic: String, val res: Int, val bg: String, val title: String, val intent: PendingIntent)
+
+    private fun speakerIntent(ctx: Context): PendingIntent = PendingIntent.getBroadcast(
+        ctx, 21,
+        Intent(ctx, CallActionReceiver::class.java).setAction(CallActionReceiver.ACTION_SPEAKER),
+        PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+    )
+
+    private fun callButtons(ctx: Context, info: CallInfo, p: ModulePrefs): List<CallButton> {
+        val out = ArrayList<CallButton>()
+        if (info.state == CallState.INCOMING) {
+            info.decline?.let { out.add(CallButton(ACTION_CALL_A, PIC_CALL_END, R.drawable.ic_call_end, p.callColorEnd, "Decline", it)) }
+            info.answer?.let { out.add(CallButton(ACTION_CALL_B, PIC_CALL_WHITE, R.drawable.ic_call, p.callColorAnswer, "Answer", it)) }
+        } else {
+            out.add(CallButton(ACTION_CALL_A, PIC_SPEAKER, R.drawable.ic_volume_up, if (CallAudio.speakerOn(ctx)) p.callColorSpeakerOn else p.callColorSpeaker, "Speaker", info.speaker ?: speakerIntent(ctx)))
+            info.hangUp?.let { out.add(CallButton(ACTION_CALL_B, PIC_CALL_END, R.drawable.ic_call_end, p.callColorEnd, "Hang up", it)) }
+        }
+        return out
+    }
+
+    fun callStatus(info: CallInfo, p: ModulePrefs? = null): String = when (info.state) {
+        CallState.INCOMING -> p?.callTextIncoming?.trim()?.take(16)?.takeIf { it.isNotEmpty() } ?: "Incoming call"
+        CallState.OUTGOING -> p?.callTextOutgoing?.trim()?.take(16)?.takeIf { it.isNotEmpty() } ?: "Calling..."
+        CallState.ONGOING -> {
+            val s = ((System.currentTimeMillis() - info.startedAt) / 1000L).coerceAtLeast(0L)
+            if (s >= 3600L) String.format("%d:%02d:%02d", s / 3600, s % 3600 / 60, s % 60)
+            else String.format("%02d:%02d", s / 60, s % 60)
+        }
+    }
+
+    private fun callJson(info: CallInfo, p: ModulePrefs, expand: Boolean, buttons: List<CallButton>): String {
+        val status = callStatus(info, p)
+        val lead = if (p.callShowAvatar) PIC_AVATAR else PIC_CALL
+        val green = "#22C841"
+        val left = JSONObject().put("type", 1).put("picInfo", pic(lead))
+        val right = JSONObject().put("type", 2).put("textInfo", JSONObject().put("title", status))
+        val big = JSONObject().put("imageTextInfoLeft", left).put("imageTextInfoRight", right)
+        val island = JSONObject()
+            .put("islandProperty", 1)
+            .put("islandPriority", 4)
+            .put("highlightColor", green)
+            .put("bigIslandArea", big)
+            .put("smallIslandArea", smallIsland(lead, null))
+        val v2 = paramV2(
+            business = "glancecaps_call", ticker = info.name, tickerPic = lead, aodTitle = info.name,
+            island = island,
+            base = baseInfo(info.name, status, null, green),
+            cardIcon = if (p.callShowAvatar) PIC_AVATAR else null,
+            progress = null,
+            expand = expand
+        )
+        if (p.callButtons && buttons.isNotEmpty()) {
+            val arr = JSONArray()
+            for (b in buttons) {
+                arr.put(
+                    JSONObject()
+                        .put("action", b.key)
+                        .put("actionIcon", b.pic)
+                        .put("actionIconDark", b.pic)
+                        .put("actionTitle", "")
+                )
+            }
+            v2.put("actions", arr)
+        }
+        return localize(JSONObject().put("param_v2", v2).toString())
+    }
+
+    fun call(ctx: Context, info: CallInfo, p: ModulePrefs, expand: Boolean): Notification {
+        ensureChannels(ctx)
+        val status = callStatus(info, p)
+        val green = Color.parseColor("#22C841")
+        if (!useHyper(p)) {
+            return LiveUpdates.build(
+                ctx, openApp(ctx), R.drawable.ic_call,
+                title = info.name, text = status, shortText = status, progress = null,
+                accent = green, subText = "Call"
+            )
+        }
+        val buttons = callButtons(ctx, info, p)
+        val greenBmp = IslandIcons.flat(ctx, R.drawable.ic_call, green)
+        val avatarBmp = if (p.callShowAvatar) CallAvatar.bitmap(ctx, info, p) else null
+        val pics = Bundle()
+        pics.putParcelable(PIC_CALL, Icon.createWithBitmap(greenBmp))
+        if (avatarBmp != null) pics.putParcelable(PIC_AVATAR, Icon.createWithBitmap(avatarBmp))
+        for (b in buttons) {
+            pics.putParcelable(b.pic, Icon.createWithBitmap(IslandIcons.button(ctx, b.res, Color.parseColor(b.bg))))
+        }
+        pics.putParcelable(PIC_BLANK, Icon.createWithBitmap(blank))
+        val builder = baseBuilder(ctx, R.drawable.ic_call, info.name, status)
+            .setLargeIcon(Icon.createWithBitmap(avatarBmp ?: greenBmp))
+        val actionBundle = Bundle()
+        for (b in buttons) {
+            val a = Notification.Action.Builder(Icon.createWithResource(ctx, b.res), tr(b.title), b.intent).build()
+            actionBundle.putParcelable(b.key, a)
+            builder.addAction(a)
+        }
+        val extras = Bundle()
+        extras.putBundle("miui.focus.pics", pics)
+        extras.putBundle("miui.focus.actions", actionBundle)
+        val n = builder.addExtras(extras).build()
+        n.extras.putString("miui.focus.param", callJson(info, p, expand, buttons))
         return n
     }
 
@@ -515,11 +822,11 @@ object GlanceCapsNotifications {
     }
 
     private fun connectivityLive(ctx: Context, kind: ConnKind, on: Boolean, detail: String?, p: ModulePrefs): Notification {
-        val text = connText(kind, on, detail)
+        val name = connName(kind, on, detail)
         return LiveUpdates.build(
             ctx, openApp(ctx), connRes(kind, on),
-            title = if (kind == ConnKind.AIRPLANE) connLabel(kind) else text,
-            text = if (kind == ConnKind.AIRPLANE) text else connLabel(kind),
+            title = connState(kind, on, name != null),
+            text = name ?: connLabel(kind),
             shortText = if (on) "On" else "Off", progress = null,
             accent = Color.parseColor(connAccent(kind, on)),
             timeoutMs = p.connSeconds.coerceIn(2, 10) * 1000L,
@@ -542,7 +849,7 @@ object GlanceCapsNotifications {
         return when (day) {
             today -> "Today $time"
             today.plusDays(1) -> "Tomorrow $time"
-            else -> java.text.SimpleDateFormat("EEE d MMM", java.util.Locale.getDefault()).format(java.util.Date(m.kickoff)) + " " + time
+            else -> java.text.SimpleDateFormat("EEE d MMM", com.dang.glancecaps.i18n.Lang.locale).format(java.util.Date(m.kickoff)) + " " + time
         }
     }
 
@@ -600,7 +907,7 @@ object GlanceCapsNotifications {
             expand = expand,
             hint = hint
         )
-        return JSONObject().put("param_v2", v2).toString()
+        return localize(JSONObject().put("param_v2", v2).toString())
     }
 
     fun matchSignature(ctx: Context, m: MatchInfo, p: ModulePrefs, logos: Boolean): String =
@@ -662,7 +969,7 @@ object GlanceCapsNotifications {
         if (p.weatherShowRange) parts.add("H ${conv(w.high)}°  L ${conv(w.low)}°")
         if (p.weatherShowHumidity) parts.add("${w.humidity}%")
         if (p.weatherShowWind) parts.add("${w.wind.roundToInt()} km/h")
-        val cityName = if (p.weatherSource == "system") com.dang.glancecaps.weather.SystemWeather.city else p.weatherCity
+        val cityName = p.weatherCity
         if (p.weatherShowCity && cityName.isNotBlank()) parts.add(cityName.substringBefore(","))
         return if (parts.isEmpty()) WeatherCodes.label(w.code, w.day) else parts.joinToString("  -  ")
     }
@@ -712,7 +1019,7 @@ object GlanceCapsNotifications {
             progress = null,
             expand = expand
         )
-        return JSONObject().put("param_v2", v2).toString()
+        return localize(JSONObject().put("param_v2", v2).toString())
     }
 
     fun weatherSignature(ctx: Context, w: Weather, p: ModulePrefs): String =
@@ -744,6 +1051,32 @@ object GlanceCapsNotifications {
             accent = Color.parseColor(WeatherCodes.accent(w.code, w.day)),
             subText = "Weather"
         )
+    }
+
+    private val textKeys = setOf("title", "content", "subContent", "frontTitle", "ticker", "aodTitle", "subTitle", "text", "label")
+
+    private fun translateNode(node: JSONObject) {
+        val keys = ArrayList<String>()
+        val it = node.keys()
+        while (it.hasNext()) keys.add(it.next())
+        for (k in keys) {
+            when (val v = node.opt(k)) {
+                is String -> if (k in textKeys) node.put(k, tr(v))
+                is JSONObject -> translateNode(v)
+                is JSONArray -> for (i in 0 until v.length()) (v.opt(i) as? JSONObject)?.let { translateNode(it) }
+            }
+        }
+    }
+
+    private fun localize(json: String): String {
+        if (!Lang.translating) return json
+        return try {
+            val root = JSONObject(json)
+            translateNode(root)
+            root.toString()
+        } catch (e: Throwable) {
+            json
+        }
     }
 
     private fun alertAccent(level: Int): String = when (level) {
@@ -793,7 +1126,7 @@ object GlanceCapsNotifications {
             progress = null,
             expand = expand
         )
-        return JSONObject().put("param_v2", v2).toString()
+        return localize(JSONObject().put("param_v2", v2).toString())
     }
 
     fun alertSignature(a: WeatherAlert, p: ModulePrefs): String = alertJson(a, false) + "|" + p.islandMode

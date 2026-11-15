@@ -7,7 +7,6 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -15,6 +14,9 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalView
+import androidx.compose.ui.platform.LocalContext
+import com.dang.glancecaps.call.CallAccess
+import com.dang.glancecaps.call.CallTracker
 import androidx.compose.ui.unit.dp
 import com.dang.glancecaps.R
 import com.dang.glancecaps.battery.BatterySnapshot
@@ -37,12 +39,15 @@ fun ModulesScreen(
     onOpen: (Int) -> Unit,
 ) {
     val view = LocalView.current
+    val ctx = LocalContext.current
+    var callOn by remember { mutableStateOf(prefs.callEnabled) }
     var chargingOn by remember { mutableStateOf(prefs.chargingEnabled) }
     var tempOn by remember { mutableStateOf(prefs.tempEnabled) }
     var stepsOn by remember { mutableStateOf(prefs.stepsEnabled) }
     var connOn by remember { mutableStateOf(prefs.connEnabled) }
     var matchOn by remember { mutableStateOf(prefs.matchEnabled) }
     var weatherOn by remember { mutableStateOf(prefs.weatherEnabled) }
+    var pinnedOn by remember { mutableStateOf(prefs.pinnedEnabled) }
 
     val chargingLine = when {
         !chargingOn -> "Off"
@@ -67,6 +72,7 @@ fun ModulesScreen(
 
     ScreenFrame(title = "Modules", subtitle = "Everything important, at a glance...", spacing = 16.dp) {
 
+        GroupLabel("Device")
         Group {
             RowItem(
                 icon = R.drawable.ic_bolt,
@@ -95,6 +101,22 @@ fun ModulesScreen(
             }
             RowDivider()
             RowItem(
+                icon = R.drawable.ic_wifi_on,
+                title = "Connectivity",
+                subtitle = connLine,
+                onClick = { Haptics.tick(view); onOpen(4) }
+            ) {
+                HSwitch(connOn) {
+                    connOn = it
+                    prefs.connEnabled = it
+                    onConnToggled(it)
+                }
+            }
+        }
+
+        GroupLabel("Live info")
+        Group {
+            RowItem(
                 icon = R.drawable.ic_directions_walk,
                 title = "Steps",
                 subtitle = stepsLine,
@@ -108,15 +130,15 @@ fun ModulesScreen(
             }
             RowDivider()
             RowItem(
-                icon = R.drawable.ic_wifi_on,
-                title = "Connectivity",
-                subtitle = connLine,
-                onClick = { Haptics.tick(view); onOpen(4) }
+                icon = R.drawable.ic_wx_partly,
+                title = "Weather",
+                subtitle = if (!weatherOn) "Off" else if (prefs.weatherCity.isBlank()) "Pick a city" else prefs.weatherCity.substringBefore(","),
+                onClick = { Haptics.tick(view); onOpen(6) }
             ) {
-                HSwitch(connOn) {
-                    connOn = it
-                    prefs.connEnabled = it
-                    onConnToggled(it)
+                HSwitch(weatherOn) {
+                    weatherOn = it
+                    prefs.weatherEnabled = it
+                    onWeatherToggled(it)
                 }
             }
             RowDivider()
@@ -132,17 +154,38 @@ fun ModulesScreen(
                     onMatchToggled(it)
                 }
             }
+        }
+
+        GroupLabel("Always on and calls")
+        Group {
+            RowItem(
+                icon = R.drawable.ic_pin,
+                title = "Pinned Island",
+                subtitle = if (!pinnedOn) "Off" else "Always on",
+                onClick = { Haptics.tick(view); onOpen(7) }
+            ) {
+                HSwitch(pinnedOn) {
+                    pinnedOn = it
+                    prefs.pinnedEnabled = it
+                    onChanged()
+                }
+            }
             RowDivider()
             RowItem(
-                icon = R.drawable.ic_wx_partly,
-                title = "Weather",
-                subtitle = if (!weatherOn) "Off" else if (prefs.weatherSource == "system") "System weather app" else if (prefs.weatherCity.isBlank()) "Pick a city" else prefs.weatherCity.substringBefore(","),
-                onClick = { Haptics.tick(view); onOpen(6) }
+                icon = R.drawable.ic_call,
+                title = "Calls",
+                subtitle = when {
+                    !callOn -> "Off"
+                    !CallAccess.granted(ctx) -> "Needs notification access"
+                    else -> "Any call app"
+                },
+                onClick = { Haptics.tick(view); onOpen(8) }
             ) {
-                HSwitch(weatherOn) {
-                    weatherOn = it
-                    prefs.weatherEnabled = it
-                    onWeatherToggled(it)
+                HSwitch(callOn) {
+                    callOn = it
+                    prefs.callEnabled = it
+                    if (!it) CallTracker.end(ctx)
+                    onChanged()
                 }
             }
         }

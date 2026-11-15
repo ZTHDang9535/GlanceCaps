@@ -37,9 +37,6 @@ object TheSportsDbApi {
             n.startsWith("spanish") && n.contains("la liga") -> "Spain" to "LaLiga"
             n.startsWith("italian") && n.contains("serie a") -> "Italy" to "Serie A"
             n.startsWith("german") && n.contains("bundesliga") && !n.contains("2") -> "Germany" to "Bundesliga"
-            n.startsWith("vietnam") && n.contains("league 1") -> "Vietnam" to "V.League 1"
-            n.startsWith("vietnam") && n.contains("league 2") -> "Vietnam" to "V.League 2"
-            n.startsWith("vietnam") && n.contains("cup") -> "Vietnam" to "Vietnam Cup"
             else -> "" to raw
         }
     }

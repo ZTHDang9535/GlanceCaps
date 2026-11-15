@@ -1,6 +1,7 @@
 package com.dang.glancecaps.island
 
 import android.app.Notification
+import com.dang.glancecaps.i18n.tr
 import android.app.NotificationManager
 import android.app.PendingIntent
 import android.content.Context
@@ -27,6 +28,24 @@ object LiveUpdates {
     }
 
     fun build(
+        ctx: Context,
+        open: PendingIntent,
+        smallIcon: Int,
+        title: String,
+        text: String,
+        shortText: String?,
+        progress: Int?,
+        accent: Int,
+        timeoutMs: Long = 0L,
+        largeIcon: android.graphics.Bitmap? = null,
+        subText: String? = null,
+        closeIntent: PendingIntent? = null,
+    ): Notification = buildRaw(
+        ctx, open, smallIcon, tr(title), tr(text), shortText?.let { tr(it) }, progress, accent,
+        timeoutMs, largeIcon, subText?.let { tr(it) }, closeIntent
+    )
+
+    private fun buildRaw(
         ctx: Context,
         open: PendingIntent,
         smallIcon: Int,

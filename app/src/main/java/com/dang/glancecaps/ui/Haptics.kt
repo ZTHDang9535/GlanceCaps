@@ -28,4 +28,8 @@ object Haptics {
         if (Build.VERSION.SDK_INT >= 30) view.performHapticFeedback(HapticFeedbackConstants.CONFIRM)
         else view.performHapticFeedback(HapticFeedbackConstants.CONTEXT_CLICK)
     }
+
+    fun longPress(view: View) {
+        if (enabled) view.performHapticFeedback(HapticFeedbackConstants.LONG_PRESS)
+    }
 }

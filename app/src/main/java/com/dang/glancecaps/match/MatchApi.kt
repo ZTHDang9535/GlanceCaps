@@ -55,24 +55,39 @@ class Competition(val key: String, val name: String, val country: String) {
 }
 
 object MatchSources {
+    const val AUTO = "auto"
     const val ESPN = "espn"
+    const val LIVESCORE = "livescore"
+    const val SOFASCORE = "sofascore"
+    const val FOOTBALLDATA = "footballdata"
     const val APIFOOTBALL = "apifootball"
     const val THESPORTSDB = "thesportsdb"
-    const val SOFASCORE = "sofascore"
 
     val all: List<Pair<String, String>> = listOf(
-        APIFOOTBALL to "API-Football",
+        AUTO to "Auto (best available)",
         ESPN to "ESPN",
-        THESPORTSDB to "TheSportsDB",
-        SOFASCORE to "SofaScore"
+        LIVESCORE to "LiveScore",
+        SOFASCORE to "SofaScore",
+        FOOTBALLDATA to "football-data.org",
+        APIFOOTBALL to "API-Football",
+        THESPORTSDB to "TheSportsDB"
     )
 
-    fun needsKey(key: String): Boolean = key == APIFOOTBALL
+    fun needsKey(key: String): Boolean = key == APIFOOTBALL || key == FOOTBALLDATA
 }
 
 object MatchApi {
     private const val BASE = "https://prod-public-api.livescore.com/v1/api/app"
     private const val IMAGES = "https://lsm-static-prod.livescore.com/high/"
+    @Volatile
+    var lastError: String = ""
+
+    private fun hostOf(url: String): String = try {
+        URL(url).host
+    } catch (e: Throwable) {
+        url
+    }
+
     fun get(url: String): String? = getWith(url, emptyMap())
 
     fun getWith(url: String, headers: Map<String, String>): String? {
@@ -84,8 +99,15 @@ object MatchApi {
             c.setRequestProperty("User-Agent", "Mozilla/5.0")
             c.setRequestProperty("Accept", "application/json")
             for ((k, v) in headers) c.setRequestProperty(k, v)
-            if (c.responseCode != 200) null else c.inputStream.bufferedReader().use { it.readText() }
+            val code = c.responseCode
+            if (code != 200) {
+                lastError = hostOf(url) + ": HTTP " + code
+                null
+            } else {
+                c.inputStream.bufferedReader().use { it.readText() }
+            }
         } catch (e: Throwable) {
+            lastError = hostOf(url) + ": " + e.javaClass.simpleName
             null
         } finally {
             c?.disconnect()
@@ -131,11 +153,59 @@ object MatchApi {
             }.thenBy { it.kickoff })
     }
 
-    fun fetchLocalDay(day: LocalDate, source: String, apiKey: String): List<MatchInfo>? = when (source) {
+    fun fetchLocalDay(day: LocalDate, source: String, apiKey: String, fdKey: String = ""): List<MatchInfo>? {
+        if (source == MatchSources.AUTO) return fetchAuto(day, apiKey, fdKey)
+        return fetchFrom(source, day, apiKey, fdKey)
+    }
+
+    private fun fetchFrom(source: String, day: LocalDate, apiKey: String, fdKey: String): List<MatchInfo>? = when (source) {
         MatchSources.SOFASCORE -> collectLocal(day) { fetchSofaUtcDay(it) }?.filter { MatchLeagues.allowed(it) }
-        MatchSources.APIFOOTBALL -> ApiFootballApi.fetchDay(day, apiKey)
+        MatchSources.LIVESCORE -> collectLocal(day) { fetchUtcDay(it) }?.filter { MatchLeagues.allowed(it) }
+        MatchSources.APIFOOTBALL -> if (apiKey.isBlank()) null else ApiFootballApi.fetchDay(day, apiKey)
+        MatchSources.FOOTBALLDATA -> if (fdKey.isBlank()) null else FootballDataApi.fetchDay(day, fdKey)
         MatchSources.THESPORTSDB -> TheSportsDbApi.fetchDay(day)
         else -> EspnApi.fetchDay(day)
+    }
+
+    private fun fetchAuto(day: LocalDate, apiKey: String, fdKey: String): List<MatchInfo>? {
+        val order = ArrayList<String>()
+        order.add(MatchSources.ESPN)
+        order.add(MatchSources.LIVESCORE)
+        order.add(MatchSources.SOFASCORE)
+        if (fdKey.isNotBlank()) order.add(MatchSources.FOOTBALLDATA)
+        if (apiKey.isNotBlank()) order.add(MatchSources.APIFOOTBALL)
+        order.add(MatchSources.THESPORTSDB)
+        var reached = false
+        for (source in order) {
+            val result = fetchFrom(source, day, apiKey, fdKey) ?: continue
+            reached = true
+            if (result.isNotEmpty()) return result
+        }
+        return if (reached) emptyList() else null
+    }
+
+    private fun norm(s: String): String = s.lowercase().filter { it.isLetterOrDigit() }
+
+    private fun sameTeam(a: MatchTeam, b: MatchTeam): Boolean {
+        val x = norm(a.name)
+        val y = norm(b.name)
+        if (x.isNotEmpty() && y.isNotEmpty() && (x == y || x.contains(y) || y.contains(x))) return true
+        val p = norm(a.abbr)
+        return p.isNotEmpty() && p == norm(b.abbr)
+    }
+
+    fun findEquivalent(m: MatchInfo?, apiKey: String, fdKey: String): MatchInfo? {
+        if (m == null || m.kickoff <= 0L) return null
+        val day = Instant.ofEpochMilli(m.kickoff).atZone(ZoneId.systemDefault()).toLocalDate()
+        val own = m.id.substringBefore(':')
+        val order = listOf("e" to MatchSources.ESPN, "l" to MatchSources.LIVESCORE, "s" to MatchSources.SOFASCORE, "f" to MatchSources.FOOTBALLDATA, "a" to MatchSources.APIFOOTBALL, "t" to MatchSources.THESPORTSDB)
+        for ((prefix, source) in order) {
+            if (prefix == own) continue
+            val list = fetchFrom(source, day, apiKey, fdKey) ?: continue
+            val hit = list.firstOrNull { sameTeam(m.home, it.home) && sameTeam(m.away, it.away) }
+            if (hit != null) return hit
+        }
+        return null
     }
 
     private fun sofaGet(url: String): String? {
@@ -152,8 +222,15 @@ object MatchApi {
             c.setRequestProperty("Referer", "https://www.sofascore.com/")
             c.setRequestProperty("Accept", "*/*")
             c.setRequestProperty("Accept-Language", "en-US,en;q=0.9")
-            if (c.responseCode != 200) null else c.inputStream.bufferedReader().use { it.readText() }
+            val code = c.responseCode
+            if (code != 200) {
+                lastError = hostOf(url) + ": HTTP " + code
+                null
+            } else {
+                c.inputStream.bufferedReader().use { it.readText() }
+            }
         } catch (e: Throwable) {
+            lastError = hostOf(url) + ": " + e.javaClass.simpleName
             null
         } finally {
             c?.disconnect()
@@ -276,9 +353,10 @@ object MatchApi {
         }
     }
 
-    fun fetchOne(id: String, apiKey: String): MatchInfo? = when {
+    fun fetchOne(id: String, apiKey: String, fdKey: String = ""): MatchInfo? = when {
         id.startsWith("e:") -> EspnApi.fetchOne(id.removePrefix("e:"))
         id.startsWith("a:") -> ApiFootballApi.fetchOne(id.removePrefix("a:"), apiKey)
+        id.startsWith("f:") -> FootballDataApi.fetchOne(id.removePrefix("f:"), fdKey)
         id.startsWith("t:") -> TheSportsDbApi.fetchOne(id.removePrefix("t:"))
         id.startsWith("s:") -> fetchSofaOne(id.removePrefix("s:"))
         else -> fetchLivescoreOne(id.removePrefix("l:"))

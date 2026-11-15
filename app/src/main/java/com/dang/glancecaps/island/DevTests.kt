@@ -1,6 +1,11 @@
 package com.dang.glancecaps.island
 
 import android.app.NotificationManager
+import android.app.PendingIntent
+import android.content.Intent
+import com.dang.glancecaps.call.CallActionReceiver
+import com.dang.glancecaps.call.CallInfo
+import com.dang.glancecaps.call.CallState
 import android.content.Context
 import com.dang.glancecaps.battery.BatterySnapshot
 import com.dang.glancecaps.data.ModulePrefs
@@ -32,27 +37,24 @@ object DevTests {
     )
 
     private fun charge(label: String, level: Int, full: Boolean, watts: Float, eta: Int?) = DevCase(label) { ctx, p ->
-        nm(ctx).notify(
-            GlanceCapsNotifications.ID_CHARGING,
+        IslandPoster.post(ctx, GlanceCapsNotifications.ID_CHARGING,
             GlanceCapsNotifications.charging(ctx, battery(level, full, watts, 33f), eta, p, false, true)
         )
     }
 
     private fun temp(label: String, tempC: Float) = DevCase(label) { ctx, p ->
-        nm(ctx).notify(
-            GlanceCapsNotifications.ID_TEMP,
+        IslandPoster.post(ctx, GlanceCapsNotifications.ID_TEMP,
             GlanceCapsNotifications.temperature(ctx, battery(60, false, 20f, tempC), p, true)
         )
     }
 
     private fun steps(label: String, count: (ModulePrefs) -> Int) = DevCase(label) { ctx, p ->
-        nm(ctx).notify(GlanceCapsNotifications.ID_STEPS, GlanceCapsNotifications.steps(ctx, count(p), p, true))
+        IslandPoster.post(ctx, GlanceCapsNotifications.ID_STEPS, GlanceCapsNotifications.steps(ctx, count(p), p, true))
     }
 
     private fun conn(label: String, kind: GlanceCapsNotifications.ConnKind, on: Boolean, detail: String?) =
         DevCase(label) { ctx, p ->
-            nm(ctx).notify(
-                GlanceCapsNotifications.ID_CONN,
+            IslandPoster.post(ctx, GlanceCapsNotifications.ID_CONN,
                 GlanceCapsNotifications.connectivity(ctx, kind, on, detail, p)
             )
         }
@@ -67,19 +69,18 @@ object DevTests {
                 away = MatchTeam("Saigon FC", "SGN", "", away)
             )
             val logo = MatchLogos.placeholder()
-            nm(ctx).notify(
-                GlanceCapsNotifications.ID_MATCH,
+            IslandPoster.post(ctx, GlanceCapsNotifications.ID_MATCH,
                 GlanceCapsNotifications.match(ctx, m, logo, logo, MatchLogos.pair(logo, logo), p, true)
             )
         }
 
     private fun weather(label: String, code: Int, day: Boolean, tempC: Double) = DevCase(label) { ctx, p ->
         val w = Weather(tempC, tempC + 2.0, code, day, tempC + 4.0, tempC - 5.0, 72, 14.0)
-        nm(ctx).notify(GlanceCapsNotifications.ID_WEATHER, GlanceCapsNotifications.weather(ctx, w, p, true))
+        IslandPoster.post(ctx, GlanceCapsNotifications.ID_WEATHER, GlanceCapsNotifications.weather(ctx, w, p, true))
     }
 
     private fun alert(label: String, a: WeatherAlert) = DevCase(label) { ctx, p ->
-        nm(ctx).notify(GlanceCapsNotifications.ID_ALERT, GlanceCapsNotifications.alert(ctx, a, p, true))
+        IslandPoster.post(ctx, GlanceCapsNotifications.ID_ALERT, GlanceCapsNotifications.alert(ctx, a, p, true))
     }
 
     val modules: List<DevModule> = listOf(
@@ -108,6 +109,7 @@ object DevTests {
             listOf(
                 conn("Wi-Fi connected", GlanceCapsNotifications.ConnKind.WIFI, true, "Home Wi-Fi"),
                 conn("Wi-Fi off", GlanceCapsNotifications.ConnKind.WIFI, false, null),
+                conn("Wi-Fi long name", GlanceCapsNotifications.ConnKind.WIFI, true, "Dang's Super Long Home Network 5G"),
                 conn("Bluetooth connected", GlanceCapsNotifications.ConnKind.BLUETOOTH, true, "Headphones"),
                 conn("Bluetooth off", GlanceCapsNotifications.ConnKind.BLUETOOTH, false, null),
                 conn("Airplane mode on", GlanceCapsNotifications.ConnKind.AIRPLANE, true, null),
@@ -153,15 +155,55 @@ object DevTests {
                     WeatherAlert("dev4", "Thunderstorm", "Severe Thunderstorm Warning", "Damaging winds and large hail expected until 9:00 PM", 1, 0, "NWS")
                 )
             )
+        ),
+        DevModule(
+            "Updates",
+            listOf(
+                DevCase("Update island v9.9.9") { ctx, p ->
+                    IslandPoster.post(ctx, GlanceCapsNotifications.ID_UPDATE, GlanceCapsNotifications.update(ctx, "9.9.9", p))
+                }
+            )
+        ),
+        DevModule(
+            "Calls",
+            listOf(
+                DevCase("Incoming call") { ctx, p ->
+                    postCall(ctx, p, CallInfo("dev", "dev", "Test InCallUI", CallState.INCOMING, 0L, devIntent(ctx), devIntent(ctx), devIntent(ctx), null))
+                },
+                DevCase("Outgoing call") { ctx, p ->
+                    postCall(ctx, p, CallInfo("dev", "dev", "Test InCallUI", CallState.OUTGOING, 0L, devIntent(ctx), null, null, null))
+                },
+                DevCase("Ongoing call") { ctx, p ->
+                    postCall(ctx, p, CallInfo("dev", "dev", "Test InCallUI", CallState.ONGOING, System.currentTimeMillis() - 754_000L, devIntent(ctx), null, null, null))
+                }
+            )
+        ),
+        DevModule(
+            "Pinned Island",
+            listOf(
+                DevCase("Pinned island") { ctx, p ->
+                    IslandPoster.post(ctx, GlanceCapsNotifications.ID_PINNED, GlanceCapsNotifications.pinned(ctx, p))
+                }
+            )
         )
     )
+
+    private fun devIntent(ctx: Context): PendingIntent = PendingIntent.getBroadcast(
+        ctx, 22,
+        Intent(ctx, CallActionReceiver::class.java).setAction("com.dang.glancecaps.DEV_NOOP"),
+        PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+    )
+
+    private fun postCall(ctx: Context, p: ModulePrefs, info: CallInfo) {
+        IslandPoster.post(ctx, GlanceCapsNotifications.ID_CALL, GlanceCapsNotifications.call(ctx, info, p, true))
+    }
 
     fun clear(ctx: Context) {
         val n = nm(ctx)
         listOf(
             GlanceCapsNotifications.ID_CHARGING, GlanceCapsNotifications.ID_TEMP, GlanceCapsNotifications.ID_STEPS,
             GlanceCapsNotifications.ID_CONN, GlanceCapsNotifications.ID_MATCH, GlanceCapsNotifications.ID_WEATHER,
-            GlanceCapsNotifications.ID_ALERT
+            GlanceCapsNotifications.ID_ALERT, GlanceCapsNotifications.ID_UPDATE, GlanceCapsNotifications.ID_PINNED, GlanceCapsNotifications.ID_CALL
         ).forEach { n.cancel(it) }
     }
 }

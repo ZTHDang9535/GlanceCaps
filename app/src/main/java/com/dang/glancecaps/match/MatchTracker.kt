@@ -15,6 +15,7 @@ object MatchTracker {
     @Volatile private var busy = false
     @Volatile private var lastFetch = 0L
     @Volatile private var trackedId = ""
+    @Volatile private var failStreak = 0
     private val pool = Executors.newSingleThreadExecutor()
 
     fun reset() {
@@ -24,6 +25,7 @@ object MatchTracker {
         pair = null
         lastFetch = 0L
         trackedId = ""
+        failStreak = 0
     }
 
     fun refresh(ctx: Context, p: ModulePrefs) {
@@ -42,11 +44,28 @@ object MatchTracker {
         if (busy || now - lastFetch < interval) return
         busy = true
         val apiKey = p.matchApiKey
+        val fdKey = p.matchFdKey
         val seedLeague = p.matchLeagueName
         val seedKickoff = p.matchKickoff.toLongOrNull() ?: 0L
         pool.execute {
             try {
-                val found = MatchApi.fetchOne(id, apiKey)?.withMeta(seedLeague, seedKickoff)
+                var found = MatchApi.fetchOne(id, apiKey, fdKey)?.withMeta(seedLeague, seedKickoff)
+                if (found == null) {
+                    failStreak++
+                    if (failStreak >= 3) {
+                        val other = MatchApi.findEquivalent(current, apiKey, fdKey)
+                        if (other != null) {
+                            p.matchId = other.id
+                            trackedId = other.id
+                            found = other.withMeta(seedLeague, seedKickoff)
+                            failStreak = 0
+                        } else if (failStreak == 3) {
+                            CrashLog.append(ctx, "match.fetch", IllegalStateException("tracking failed 3 times: " + MatchApi.lastError))
+                        }
+                    }
+                } else {
+                    failStreak = 0
+                }
                 if (found != null) {
                     val previous = current
                     current = found

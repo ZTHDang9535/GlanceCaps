@@ -24,7 +24,6 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
@@ -100,7 +99,7 @@ fun AboutScreen() {
             textAlign = TextAlign.Center
         )
         Text(
-            "15 y/o",
+            "April 3rd 🎂",
             style = MaterialTheme.typography.bodyLarge,
             textAlign = TextAlign.Center
         )
@@ -109,6 +108,12 @@ fun AboutScreen() {
 
         SectionCard("Contact", Modifier.fillMaxWidth()) {
             SocialLinks(profile)
+        }
+
+        Spacer(Modifier.height(16.dp))
+
+        SectionCard("Contributors", Modifier.fillMaxWidth()) {
+            ContributorCards()
         }
 
         Spacer(Modifier.height(32.dp))

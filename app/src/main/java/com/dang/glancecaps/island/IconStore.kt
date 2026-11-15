@@ -59,7 +59,7 @@ object IconStore {
 
     fun stamp(ctx: Context): Long = file(ctx).let { if (it.exists()) it.lastModified() else 0L }
 
-    private fun loadSquare(ctx: Context, uri: Uri, size: Int): Bitmap? {
+    internal fun loadSquare(ctx: Context, uri: Uri, size: Int): Bitmap? {
         return try {
             val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
             ctx.contentResolver.openInputStream(uri)?.use { BitmapFactory.decodeStream(it, null, bounds) }

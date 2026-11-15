@@ -2,7 +2,7 @@
 
 ## Material Symbols (Rounded)
 The UI and island icons (bolt, thermostat, grid view, tune, person, arrow back, check circle, error,
-help, lock, wallpaper) come from Google's Material Symbols.
+help, lock, wallpaper, download, push pin, call, call end, volume up) come from Google's Material Symbols.
 Source: https://github.com/google/material-design-icons
 License: Apache License 2.0 - https://www.apache.org/licenses/LICENSE-2.0
 
@@ -14,3 +14,9 @@ License: Apache License 2.0 - https://www.apache.org/licenses/LICENSE-2.0
 ## HyperIsland-ToolKit (reference)
 The island JSON structure (including the "Parking" card layout) was written by hand following Xiaomi's HyperOS developer guide and the
 documentation of https://github.com/D4vidDf/HyperIsland-ToolKit (Apache-2.0). No code is copied.
+
+## Miuix (reference)
+The press-to-tilt behaviour of the contributor cards follows the TiltFeedback component of Miuix (top.yukonga.miuix.kmp.utils.PressFeedback).
+It was re-implemented in plain Jetpack Compose; no Miuix code or library is bundled.
+Source: https://github.com/compose-miuix-ui/miuix
+License: Apache License 2.0 - https://www.apache.org/licenses/LICENSE-2.0

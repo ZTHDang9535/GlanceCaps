@@ -15,7 +15,6 @@ import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
-import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -37,7 +36,6 @@ import androidx.compose.ui.unit.sp
 import com.dang.glancecaps.data.ModulePrefs
 import com.dang.glancecaps.island.GlanceCapsNotifications
 import com.dang.glancecaps.weather.City
-import com.dang.glancecaps.weather.SystemWeather
 import com.dang.glancecaps.weather.Weather
 import kotlin.math.roundToInt
 import com.dang.glancecaps.weather.AlertTracker
@@ -64,6 +62,9 @@ fun WeatherPage(prefs: ModulePrefs, onBack: () -> Unit, onChanged: () -> Unit) {
     var mode by remember { mutableStateOf(prefs.weatherMode) }
     var hour by remember { mutableIntStateOf(prefs.weatherHour) }
     var minute by remember { mutableIntStateOf(prefs.weatherMinute) }
+    var endHour by remember { mutableIntStateOf(prefs.weatherEndHour) }
+    var endMinute by remember { mutableIntStateOf(prefs.weatherEndMinute) }
+    var every by remember { mutableIntStateOf(prefs.weatherEveryHours) }
     var duration by remember { mutableIntStateOf(prefs.weatherDuration) }
     var source by remember { mutableStateOf(prefs.weatherSource) }
     var apiKey by remember { mutableStateOf(prefs.weatherKey(prefs.weatherSource)) }
@@ -91,7 +92,7 @@ fun WeatherPage(prefs: ModulePrefs, onBack: () -> Unit, onChanged: () -> Unit) {
     LaunchedEffect(cityKey, source, apiKey) {
         val lat = prefs.weatherLat.toDoubleOrNull()
         val lon = prefs.weatherLon.toDoubleOrNull()
-        if (source != WeatherSources.SYSTEM && (lat == null || lon == null)) {
+        if (lat == null || lon == null) {
             current = null
             failed = false
             return@LaunchedEffect
@@ -114,7 +115,7 @@ fun WeatherPage(prefs: ModulePrefs, onBack: () -> Unit, onChanged: () -> Unit) {
         Group {
             ToggleRow(
                 "Show weather",
-                (if (source == WeatherSources.SYSTEM) SystemWeather.city else prefs.weatherCity).ifBlank { null },
+                prefs.weatherCity.ifBlank { null },
                 { prefs.weatherEnabled }, { prefs.weatherEnabled = it }, bump
             )
         }
@@ -172,7 +173,7 @@ fun WeatherPage(prefs: ModulePrefs, onBack: () -> Unit, onChanged: () -> Unit) {
             ChoiceRow(
                 title = "Weather source",
                 subtitle = null,
-                options = WeatherSources.options(GlanceCapsNotifications.isXiaomiFamily()),
+                options = WeatherSources.options(),
                 selected = source
             ) { key ->
                 source = key
@@ -203,11 +204,7 @@ fun WeatherPage(prefs: ModulePrefs, onBack: () -> Unit, onChanged: () -> Unit) {
                 }
             } else if (failed) {
                 RowDivider()
-                if (source == WeatherSources.SYSTEM) {
-                    RowItem(icon = null, title = "Cannot read the system weather app", subtitle = "Open it once, then try again")
-                } else {
-                    RowItem(icon = null, title = "No data from this source", subtitle = null)
-                }
+                RowItem(icon = null, title = "No data from this source", subtitle = null)
             }
         }
 
@@ -231,27 +228,50 @@ fun WeatherPage(prefs: ModulePrefs, onBack: () -> Unit, onChanged: () -> Unit) {
             ChoiceRow(
                 title = "Show",
                 subtitle = null,
-                options = listOf("always" to "Any time", "scheduled" to "At a set time"),
+                options = listOf(
+                    "always" to "Any time",
+                    "scheduled" to "Between two times",
+                    "change" to "When the weather changes",
+                    "interval" to "Every few hours"
+                ),
                 selected = mode
             ) { key ->
                 mode = key
                 prefs.weatherMode = key
                 bump()
             }
-            if (mode == "scheduled") {
+            if (mode == "interval") {
                 RowDivider()
-                RowItem(icon = null, title = "Start time", subtitle = null) {
-                    TextButton(onClick = {
-                        Haptics.tick(view)
-                        TimePickerDialog(ctx, { _, h, m ->
-                            hour = h
-                            minute = m
-                            prefs.weatherHour = h
-                            prefs.weatherMinute = m
-                            bump()
-                        }, hour, minute, DateFormat.is24HourFormat(ctx)).show()
-                    }) { Text(String.format(Locale.US, "%02d:%02d", hour, minute)) }
+                ChoiceRow(
+                    title = "Every",
+                    subtitle = null,
+                    options = listOf("1" to "1 hour", "2" to "2 hours", "3" to "3 hours", "4" to "4 hours", "6" to "6 hours"),
+                    selected = every.toString()
+                ) { key ->
+                    every = key.toInt()
+                    prefs.weatherEveryHours = every
+                    bump()
                 }
+            }
+            if (mode != "always") {
+                RowDivider()
+                TimeRow(if (mode == "scheduled") "From" else "Active from", hour, minute) { h, m ->
+                    hour = h
+                    minute = m
+                    prefs.weatherHour = h
+                    prefs.weatherMinute = m
+                    bump()
+                }
+                RowDivider()
+                TimeRow(if (mode == "scheduled") "Until" else "Active until", endHour, endMinute) { h, m ->
+                    endHour = h
+                    endMinute = m
+                    prefs.weatherEndHour = h
+                    prefs.weatherEndMinute = m
+                    bump()
+                }
+            }
+            if (mode == "change" || mode == "interval") {
                 RowDivider()
                 Column(Modifier.padding(horizontal = 16.dp, vertical = 14.dp)) {
                     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
@@ -275,8 +295,8 @@ fun WeatherPage(prefs: ModulePrefs, onBack: () -> Unit, onChanged: () -> Unit) {
             }
         }
 
-        if (source != WeatherSources.SYSTEM || alertsOn) GroupLabel("City")
-        if (source != WeatherSources.SYSTEM || alertsOn) Group {
+        GroupLabel("City")
+        Group {
             Column(Modifier.padding(horizontal = 16.dp, vertical = 12.dp)) {
                 OutlinedTextField(
                     value = query,
@@ -315,5 +335,17 @@ fun WeatherPage(prefs: ModulePrefs, onBack: () -> Unit, onChanged: () -> Unit) {
         }
 
         OtherModules(6)
+    }
+}
+
+@Composable
+private fun TimeRow(title: String, hour: Int, minute: Int, onPick: (Int, Int) -> Unit) {
+    val ctx = LocalContext.current
+    val view = LocalView.current
+    RowItem(icon = null, title = title, subtitle = null) {
+        TextButton(onClick = {
+            Haptics.tick(view)
+            TimePickerDialog(ctx, { _, h, m -> onPick(h, m) }, hour, minute, DateFormat.is24HourFormat(ctx)).show()
+        }) { Text(String.format(Locale.US, "%02d:%02d", hour, minute)) }
     }
 }

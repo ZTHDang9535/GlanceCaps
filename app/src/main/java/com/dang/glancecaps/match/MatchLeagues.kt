@@ -20,29 +20,31 @@ object MatchLeagues {
     }
 
     private val leagues = listOf(
-        League("V.League 1", "vietnam", listOf("v.league 1", "v-league 1", "v league 1", "=v.league")),
-        League("V.League 2", "vietnam", listOf("v.league 2", "v-league 2", "v league 2")),
-        League("Vietnam Cup", "vietnam", listOf("cup"), listOf("women", "u19", "u21", "u23", "youth", "futsal")),
-        League("ASEAN Championship", "", listOf("asean championship", "aff championship", "aff cup", "asean cup")),
-        League("ASEAN Club Championship", "", listOf("asean club championship", "shopee cup", "aff club championship")),
-        League("SEA Games", "", listOf("sea games", "southeast asian games"), listOf("women")),
-        League("AFF U23 Championship", "", listOf("aff u23", "aff u-23"), listOf("women")),
         League("Premier League", "england", listOf("=premier league")),
-        League("Championship", "england", listOf("=championship")),
-        League("League One", "england", listOf("=league one", "=league 1")),
-        League("League Two", "england", listOf("=league two", "=league 2")),
-        League("FA Cup", "england", listOf("fa cup")),
-        League("EFL Cup", "england", listOf("efl cup", "carabao cup", "league cup")),
         League("LaLiga", "spain", listOf("=laliga", "=la liga", "=primera division", "=primera división")),
         League("Serie A", "italy", listOf("=serie a")),
         League("Bundesliga", "germany", listOf("=bundesliga")),
-        League("FIFA World Cup", "", listOf("world cup"), common + "club"),
+        League("Ligue 1", "france", listOf("=ligue 1")),
         League("UEFA Champions League", "", listOf("uefa champions league"), common + listOf("qualification", "afc", "caf", "concacaf")),
         League("UEFA Europa League", "", listOf("uefa europa league"), common + "qualification"),
         League("UEFA Conference League", "", listOf("conference league"), common + "qualification"),
+        League("FIFA World Cup", "", listOf("world cup"), common + "club"),
         League("UEFA Euro", "", listOf("=euro", "euro, qualification", "euro qualification", "european championship", "uefa euro", "euro championship")),
         League("UEFA Nations League", "", listOf("nations league")),
-        League("AFC Asian Cup", "", listOf("asian cup"))
+        League("Copa America", "", listOf("copa america", "copa américa")),
+        League("FA Cup", "england", listOf("fa cup")),
+        League("EFL Cup", "england", listOf("efl cup", "carabao cup", "league cup")),
+        League("Copa del Rey", "spain", listOf("copa del rey")),
+        League("Coppa Italia", "italy", listOf("coppa italia")),
+        League("DFB-Pokal", "germany", listOf("dfb-pokal", "dfb pokal")),
+        League("Coupe de France", "france", listOf("coupe de france")),
+        League("Championship", "england", listOf("=championship")),
+        League("Eredivisie", "netherlands", listOf("=eredivisie")),
+        League("Primeira Liga", "portugal", listOf("=primeira liga", "=liga portugal")),
+        League("Saudi Pro League", "saudi arabia", listOf("saudi pro league", "roshn saudi league")),
+        League("MLS", "", listOf("=mls", "=major league soccer")),
+        League("Copa Libertadores", "", listOf("copa libertadores", "libertadores")),
+        League("International Friendly", "", listOf("international friendl", "=friendlies", "=friendly"), common + "club")
     )
 
     val size: Int get() = leagues.size

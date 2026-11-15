@@ -1,5 +1,6 @@
 package com.dang.glancecaps.ui
 
+import androidx.compose.animation.animateColorAsState
 import android.graphics.Bitmap
 import android.graphics.Color as AColor
 import androidx.annotation.DrawableRes
@@ -27,7 +28,6 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
-import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.material3.OutlinedTextField
@@ -322,6 +322,60 @@ fun SectionCard(title: String, modifier: Modifier = Modifier, content: @Composab
             Text(title, style = MaterialTheme.typography.titleMedium)
             Spacer(Modifier.size(12.dp))
             content()
+        }
+    }
+}
+
+
+@Composable
+fun SegmentedControl(
+    options: List<String>,
+    selected: Int,
+    onSelect: (Int) -> Unit,
+    title: String? = null,
+) {
+    val view = LocalView.current
+    Column(
+        Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 12.dp),
+        verticalArrangement = Arrangement.spacedBy(8.dp)
+    ) {
+        if (title != null) {
+            Text(title, fontSize = 14.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        }
+        Row(
+            Modifier
+                .fillMaxWidth()
+                .clip(RoundedCornerShape(50))
+                .background(MaterialTheme.colorScheme.surfaceContainerHighest)
+                .padding(4.dp),
+            horizontalArrangement = Arrangement.spacedBy(4.dp)
+        ) {
+            options.forEachIndexed { i, option ->
+                val on = i == selected
+                val bg by animateColorAsState(
+                    if (on) MaterialTheme.colorScheme.primary else Color.Transparent,
+                    label = "segment"
+                )
+                Box(
+                    Modifier
+                        .weight(1f)
+                        .clip(RoundedCornerShape(50))
+                        .background(bg)
+                        .clickable {
+                            if (!on) {
+                                Haptics.tick(view)
+                                onSelect(i)
+                            }
+                        }
+                        .padding(vertical = 10.dp),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Text(
+                        option, fontSize = 14.sp,
+                        color = if (on) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurface
+                    )
+                }
+            }
         }
     }
 }

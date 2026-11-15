@@ -72,19 +72,65 @@ object WeatherCodes {
 }
 
 object WeatherSchedule {
-    fun active(p: ModulePrefs): Boolean {
-        if (p.weatherMode != "scheduled") return true
+    @Volatile private var visibleUntil = 0L
+
+    private fun inWindow(p: ModulePrefs): Boolean {
         val now = java.time.LocalTime.now()
         val nowMin = now.hour * 60 + now.minute
         val start = p.weatherHour * 60 + p.weatherMinute
-        val end = start + p.weatherDuration
-        return if (end <= 1440) nowMin in start until end else nowMin >= start || nowMin < end - 1440
+        val end = p.weatherEndHour * 60 + p.weatherEndMinute
+        return when {
+            start == end -> true
+            start < end -> nowMin in start until end
+            else -> nowMin >= start || nowMin < end
+        }
+    }
+
+    fun category(code: Int): String = when (code) {
+        0, 1 -> "clear"
+        2, 3 -> "cloudy"
+        45, 48 -> "fog"
+        in 51..67, in 80..82 -> "rain"
+        in 71..77, 85, 86 -> "snow"
+        in 95..99 -> "storm"
+        else -> "cloudy"
+    }
+
+    fun active(p: ModulePrefs): Boolean {
+        val nowMs = System.currentTimeMillis()
+        return when (p.weatherMode) {
+            "scheduled" -> inWindow(p)
+            "change" -> {
+                val w = WeatherTracker.current
+                if (w != null) {
+                    val cat = category(w.code)
+                    val last = p.weatherLastCat
+                    if (last.isEmpty()) {
+                        p.weatherLastCat = cat
+                    } else if (cat != last) {
+                        p.weatherLastCat = cat
+                        if (inWindow(p)) visibleUntil = nowMs + p.weatherDuration * 60_000L
+                    }
+                }
+                nowMs < visibleUntil
+            }
+            "interval" -> {
+                if (WeatherTracker.current != null && inWindow(p)) {
+                    val last = p.weatherLastShownAt.toLongOrNull() ?: 0L
+                    if (nowMs - last >= p.weatherEveryHours * 3_600_000L) {
+                        p.weatherLastShownAt = nowMs.toString()
+                        visibleUntil = nowMs + p.weatherDuration * 60_000L
+                    }
+                }
+                nowMs < visibleUntil
+            }
+            else -> true
+        }
     }
 }
 
 object WeatherSources {
     const val OPEN_METEO = "openmeteo"
-    const val SYSTEM = "system"
     const val OM_ECMWF = "om_ecmwf"
     const val OM_ICON = "om_icon"
     const val METNO = "metno"
@@ -95,7 +141,6 @@ object WeatherSources {
 
     private val labels = mapOf(
         OPEN_METEO to "Open-Meteo",
-        SYSTEM to "System weather app",
         OM_ECMWF to "Open-Meteo ECMWF",
         OM_ICON to "Open-Meteo DWD ICON",
         METNO to "MET Norway",
@@ -105,12 +150,8 @@ object WeatherSources {
         WAPI to "WeatherAPI.com (API key)"
     )
 
-    fun options(system: Boolean): List<Pair<String, String>> {
-        val order = if (system) {
-            listOf(OPEN_METEO, SYSTEM, OM_ECMWF, OM_ICON, METNO, WTTR, ACCU, OWM, WAPI)
-        } else {
-            listOf(OPEN_METEO, OM_ECMWF, OM_ICON, METNO, WTTR, ACCU, OWM, WAPI)
-        }
+    fun options(): List<Pair<String, String>> {
+        val order = listOf(OPEN_METEO, OM_ECMWF, OM_ICON, METNO, WTTR, ACCU, OWM, WAPI)
         return order.map { it to labels.getValue(it) }
     }
 
@@ -176,7 +217,6 @@ object WeatherApi {
 
     fun fetch(ctx: Context, p: ModulePrefs, lat: Double?, lon: Double?): Weather? {
         val source = p.weatherSource
-        if (source == WeatherSources.SYSTEM) return SystemWeather.fetch(ctx)
         if (lat == null || lon == null) return null
         val key = p.weatherKey(source).trim()
         if (WeatherSources.needsKey(source) && key.isEmpty()) return null
@@ -472,11 +512,10 @@ object WeatherTracker {
 
     fun refresh(ctx: Context, p: ModulePrefs) {
         val source = p.weatherSource
-        val system = source == WeatherSources.SYSTEM
         val lat = p.weatherLat.toDoubleOrNull()
         val lon = p.weatherLon.toDoubleOrNull()
-        if (!system && (lat == null || lon == null)) return
-        val key = if (system) "system" else "$lat|$lon|$source|" + p.weatherKey(source)
+        if (lat == null || lon == null) return
+        val key = "$lat|$lon|$source|" + p.weatherKey(source)
         if (key != trackedKey) {
             reset()
             trackedKey = key

@@ -14,6 +14,7 @@ import com.dang.glancecaps.battery.BatteryReader
 import com.dang.glancecaps.battery.ChargeEstimator
 import com.dang.glancecaps.data.ModulePrefs
 import com.dang.glancecaps.match.MatchTracker
+import com.dang.glancecaps.update.UpdateChecker
 import com.dang.glancecaps.weather.AlertTracker
 import com.dang.glancecaps.weather.WeatherSchedule
 import com.dang.glancecaps.weather.WeatherTracker
@@ -34,8 +35,8 @@ class GlanceCapsService : Service() {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
     private var job: Job? = null
     private val estimator = ChargeEstimator()
-    private lateinit var stepSensor: StepSensor
-    private lateinit var connMonitor: ConnectivityMonitor
+    private val stepSensor by lazy { StepSensor(this) }
+    private val connMonitor by lazy { ConnectivityMonitor(this) }
     private var matchShown = false
     private var lastMatchState = ""
     private var weatherShown = false
@@ -43,6 +44,10 @@ class GlanceCapsService : Service() {
     private var alertShown = false
     private var lastAlertSig = ""
     private var lastAlertId = ""
+    private var wasHold = false
+    private var lastChargingPost = 0L
+    private var lastChargingLevel = -1
+    private var resuming = false
     private var lastMatchSig = ""
     private var lastScoreKey = ""
     private var matchFinishedAt = 0L
@@ -67,10 +72,12 @@ class GlanceCapsService : Service() {
 
     override fun onBind(intent: Intent?): IBinder? = null
 
-    override fun onCreate() {
-        super.onCreate()
-        stepSensor = StepSensor(this)
-        connMonitor = ConnectivityMonitor(this)
+    private inline fun guard(tag: String, block: () -> Unit) {
+        try {
+            block()
+        } catch (e: Throwable) {
+            CrashLog.append(this, "service.$tag", e)
+        }
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
@@ -107,7 +114,7 @@ class GlanceCapsService : Service() {
 
     private fun tick() {
         val p = ModulePrefs(this)
-        if (!p.chargingEnabled && !p.tempEnabled && !p.stepsEnabled && !p.connEnabled && !p.matchEnabled && !p.weatherEnabled) {
+        if (!p.chargingEnabled && !p.tempEnabled && !p.stepsEnabled && !p.connEnabled && !p.matchEnabled && !p.weatherEnabled && !p.pinnedEnabled) {
             stopSelf()
             return
         }
@@ -140,66 +147,118 @@ class GlanceCapsService : Service() {
         val live = !GlanceCapsNotifications.useHyper(p)
         val merged = p.tempEnabled && p.tempMerge && !live
         val hold = ConnectivityMonitor.showing()
-
-        if (p.chargingEnabled && s.charging) {
-            val sig = GlanceCapsNotifications.chargingSignature(this, s, eta, p, merged)
-            if ((!chargingShown || sig != lastChargingSig) && !hold) {
-
-                nm.notify(
-                    GlanceCapsNotifications.ID_CHARGING,
-                    GlanceCapsNotifications.charging(this, s, eta, p, merged, expand = !chargingShown)
-                )
-                lastChargingSig = sig
-                chargingShown = true
+        if (hold != wasHold) {
+            wasHold = hold
+            if (hold) {
+                listOf(
+                    GlanceCapsNotifications.ID_CHARGING, GlanceCapsNotifications.ID_TEMP, GlanceCapsNotifications.ID_STEPS,
+                    GlanceCapsNotifications.ID_MATCH, GlanceCapsNotifications.ID_WEATHER, GlanceCapsNotifications.ID_ALERT,
+                    GlanceCapsNotifications.ID_PINNED
+                ).forEach { nm.cancel(it) }
+                chargingShown = false
+                lastChargingSig = ""
+                tempShown = false
+                lastTempSig = ""
+                stepsShown = false
+                lastStepsSig = ""
+                matchShown = false
+                lastMatchSig = ""
+                weatherShown = false
+                lastWeatherSig = ""
+                alertShown = false
+                lastAlertSig = ""
+                PinnedController.forget()
+            } else {
+                resuming = true
             }
-        } else {
-            if (chargingShown) nm.cancel(GlanceCapsNotifications.ID_CHARGING)
-            chargingShown = false
-            lastChargingSig = ""
         }
 
-        val showTemp = p.tempEnabled && (live || !p.tempMerge) && (!p.tempOnlyCharging || s.charging)
-        if (showTemp) {
-            val sig = GlanceCapsNotifications.temperatureSignature(s, p)
-            if ((!tempShown || sig != lastTempSig) && !hold) {
-                nm.notify(
-                    GlanceCapsNotifications.ID_TEMP,
-                    GlanceCapsNotifications.temperature(this, s, p, expand = !tempShown)
-                )
-                lastTempSig = sig
-                tempShown = true
-            }
-        } else {
-            if (tempShown) nm.cancel(GlanceCapsNotifications.ID_TEMP)
-            tempShown = false
-            lastTempSig = ""
+        val activeIds = try {
+            nm.activeNotifications.map { it.id }.toSet()
+        } catch (e: Throwable) {
+            null
         }
-
-        if (p.stepsEnabled) {
-            stepSensor.start()
-            val r = Steps.read(this)
+        if (activeIds != null && !hold) {
             val now = SystemClock.elapsedRealtime()
-            if (r != null) {
-                if (r.steps != lastSteps) {
-                    if (lastSteps >= 0) lastStepChangeAt = now
-                    lastSteps = r.steps
+            fun vanished(id: Int) = id !in activeIds && now - IslandPoster.lastPostAt(id) > 25_000L
+            if (chargingShown && vanished(GlanceCapsNotifications.ID_CHARGING)) { chargingShown = false; lastChargingSig = ""; resuming = true }
+            if (tempShown && vanished(GlanceCapsNotifications.ID_TEMP)) { tempShown = false; lastTempSig = ""; resuming = true }
+            if (stepsShown && vanished(GlanceCapsNotifications.ID_STEPS)) { stepsShown = false; lastStepsSig = ""; resuming = true }
+            if (matchShown && vanished(GlanceCapsNotifications.ID_MATCH)) { matchShown = false; lastMatchSig = ""; resuming = true }
+            if (weatherShown && vanished(GlanceCapsNotifications.ID_WEATHER)) { weatherShown = false; lastWeatherSig = ""; resuming = true }
+            if (alertShown && vanished(GlanceCapsNotifications.ID_ALERT)) { alertShown = false; lastAlertSig = ""; resuming = true }
+        }
+
+        guard("charging") {
+            if (p.chargingEnabled && s.charging) {
+                val sig = GlanceCapsNotifications.chargingSignature(this, s, eta, p, merged)
+                val nowMs = SystemClock.elapsedRealtime()
+                val calm = chargingShown && nowMs - lastChargingPost < 15_000L && s.level == lastChargingLevel
+                if ((!chargingShown || sig != lastChargingSig) && !hold && !calm) {
+                    IslandPoster.post(this, GlanceCapsNotifications.ID_CHARGING,
+                        GlanceCapsNotifications.charging(this, s, eta, p, merged, expand = !chargingShown && !resuming)
+                    )
+                    lastChargingSig = sig
+                    lastChargingPost = nowMs
+                    lastChargingLevel = s.level
+                    chargingShown = true
                 }
-                if (now - walkBaseAt > 60_000L || r.steps < walkBaseSteps) {
-                    walkBaseAt = now
-                    walkBaseSteps = r.steps
+            } else {
+                if (chargingShown) nm.cancel(GlanceCapsNotifications.ID_CHARGING)
+                chargingShown = false
+                lastChargingSig = ""
+                lastChargingLevel = -1
+            }
+        }
+
+        guard("temp") {
+            val showTemp = p.tempEnabled && (live || !p.tempMerge) && (!p.tempOnlyCharging || s.charging)
+            if (showTemp) {
+                val sig = GlanceCapsNotifications.temperatureSignature(s, p)
+                if ((!tempShown || sig != lastTempSig) && !hold) {
+                    IslandPoster.post(this, GlanceCapsNotifications.ID_TEMP,
+                        GlanceCapsNotifications.temperature(this, s, p, expand = !tempShown && !resuming)
+                    )
+                    lastTempSig = sig
+                    tempShown = true
                 }
-                if (r.steps - walkBaseSteps >= 12) walkingUntil = now + 3 * 60_000L
-                val walking = now < walkingUntil
-                if (p.stepAlways || walking) {
-                    val goalHit = r.steps >= p.stepGoal && p.stepPopOnGoal && StepStore.markGoalOnce(this)
-                    val sig = GlanceCapsNotifications.stepsSignature(r.steps, p)
-                    if ((!stepsShown || sig != lastStepsSig || goalHit) && !hold) {
-                        nm.notify(
-                            GlanceCapsNotifications.ID_STEPS,
-                            GlanceCapsNotifications.steps(this, r.steps, p, expand = (!stepsShown && p.stepAlways) || goalHit)
-                        )
-                        lastStepsSig = sig
-                        stepsShown = true
+            } else {
+                if (tempShown) nm.cancel(GlanceCapsNotifications.ID_TEMP)
+                tempShown = false
+                lastTempSig = ""
+            }
+        }
+
+        guard("steps") {
+            if (p.stepsEnabled) {
+                stepSensor.start()
+                val r = Steps.read(this)
+                val now = SystemClock.elapsedRealtime()
+                if (r != null) {
+                    if (r.steps != lastSteps) {
+                        if (lastSteps >= 0) lastStepChangeAt = now
+                        lastSteps = r.steps
+                    }
+                    if (now - walkBaseAt > 60_000L || r.steps < walkBaseSteps) {
+                        walkBaseAt = now
+                        walkBaseSteps = r.steps
+                    }
+                    if (r.steps - walkBaseSteps >= 12) walkingUntil = now + 3 * 60_000L
+                    val walking = now < walkingUntil
+                    if (p.stepAlways || walking) {
+                        val goalHit = r.steps >= p.stepGoal && p.stepPopOnGoal && StepStore.markGoalOnce(this)
+                        val sig = GlanceCapsNotifications.stepsSignature(r.steps, p)
+                        if ((!stepsShown || sig != lastStepsSig || goalHit) && !hold) {
+                            IslandPoster.post(this, GlanceCapsNotifications.ID_STEPS,
+                                GlanceCapsNotifications.steps(this, r.steps, p, expand = (!stepsShown && !resuming && p.stepAlways) || goalHit)
+                            )
+                            lastStepsSig = sig
+                            stepsShown = true
+                        }
+                    } else {
+                        if (stepsShown) nm.cancel(GlanceCapsNotifications.ID_STEPS)
+                        stepsShown = false
+                        lastStepsSig = ""
                     }
                 } else {
                     if (stepsShown) nm.cancel(GlanceCapsNotifications.ID_STEPS)
@@ -207,101 +266,117 @@ class GlanceCapsService : Service() {
                     lastStepsSig = ""
                 }
             } else {
+                stepSensor.stop()
                 if (stepsShown) nm.cancel(GlanceCapsNotifications.ID_STEPS)
                 stepsShown = false
                 lastStepsSig = ""
+                lastSteps = -1
+                walkBaseAt = 0L
+                walkingUntil = 0L
             }
-        } else {
-            stepSensor.stop()
-            if (stepsShown) nm.cancel(GlanceCapsNotifications.ID_STEPS)
-            stepsShown = false
-            lastStepsSig = ""
-            lastSteps = -1
-            walkBaseAt = 0L
-            walkingUntil = 0L
         }
 
-        if (p.matchEnabled && p.matchId.isNotBlank()) {
-            MatchTracker.refresh(this, p)
-            val m = MatchTracker.current
-            if (m != null) {
-                val clockNow = SystemClock.elapsedRealtime()
-                if (m.finished) {
-                    if (matchFinishedAt == 0L) matchFinishedAt = clockNow
-                } else {
-                    matchFinishedAt = 0L
-                }
-                val expired = m.finished && clockNow - matchFinishedAt > 10 * 60_000L
-                if (expired) {
-                    if (matchShown) nm.cancel(GlanceCapsNotifications.ID_MATCH)
-                    matchShown = false
-                    lastMatchSig = ""
-                } else if (!hold) {
-                    val sig = GlanceCapsNotifications.matchSignature(this, m, p, MatchTracker.pair != null)
-                    if (!matchShown || sig != lastMatchSig) {
-                        val scoreKey = m.homeScore + "-" + m.awayScore
-                        val goal = matchShown && m.live && (scoreKey != lastScoreKey || lastMatchState == "pre")
-                        nm.notify(
-                            GlanceCapsNotifications.ID_MATCH,
-                            GlanceCapsNotifications.match(this, m, MatchTracker.home, MatchTracker.away, MatchTracker.pair, p, !matchShown || goal)
-                        )
-                        lastScoreKey = scoreKey
-                        lastMatchState = m.state
-                        lastMatchSig = sig
-                        matchShown = true
+        guard("match") {
+            if (p.matchEnabled && p.matchId.isNotBlank()) {
+                MatchTracker.refresh(this, p)
+                val m = MatchTracker.current
+                if (m != null) {
+                    val clockNow = SystemClock.elapsedRealtime()
+                    if (m.finished) {
+                        if (matchFinishedAt == 0L) matchFinishedAt = clockNow
+                    } else {
+                        matchFinishedAt = 0L
+                    }
+                    val expired = m.finished && clockNow - matchFinishedAt > 10 * 60_000L
+                    if (expired) {
+                        if (matchShown) nm.cancel(GlanceCapsNotifications.ID_MATCH)
+                        matchShown = false
+                        lastMatchSig = ""
+                    } else if (!hold) {
+                        val sig = GlanceCapsNotifications.matchSignature(this, m, p, MatchTracker.pair != null)
+                        if (!matchShown || sig != lastMatchSig) {
+                            val scoreKey = m.homeScore + "-" + m.awayScore
+                            val goal = matchShown && m.live && (scoreKey != lastScoreKey || lastMatchState == "pre")
+                            IslandPoster.post(this, GlanceCapsNotifications.ID_MATCH,
+                                GlanceCapsNotifications.match(this, m, MatchTracker.home, MatchTracker.away, MatchTracker.pair, p, (!matchShown && !resuming) || goal)
+                            )
+                            lastScoreKey = scoreKey
+                            lastMatchState = m.state
+                            lastMatchSig = sig
+                            matchShown = true
+                        }
                     }
                 }
+            } else {
+                if (matchShown) nm.cancel(GlanceCapsNotifications.ID_MATCH)
+                matchShown = false
+                lastMatchSig = ""
+                matchFinishedAt = 0L
             }
-        } else {
-            if (matchShown) nm.cancel(GlanceCapsNotifications.ID_MATCH)
-            matchShown = false
-            lastMatchSig = ""
-            matchFinishedAt = 0L
         }
 
-        if (p.weatherEnabled && (p.weatherLat.isNotBlank() || p.weatherSource == "system") && WeatherSchedule.active(p)) {
-            WeatherTracker.refresh(this, p)
-            val w = WeatherTracker.current
-            if (w != null && !hold) {
-                val sig = GlanceCapsNotifications.weatherSignature(this, w, p)
-                if (!weatherShown || sig != lastWeatherSig) {
-                    nm.notify(GlanceCapsNotifications.ID_WEATHER, GlanceCapsNotifications.weather(this, w, p, !weatherShown))
-                    lastWeatherSig = sig
-                    weatherShown = true
+        guard("weather") {
+            val located = p.weatherLat.isNotBlank()
+            if (p.weatherEnabled && located) WeatherTracker.refresh(this, p)
+            if (p.weatherEnabled && located && WeatherSchedule.active(p)) {
+                val w = WeatherTracker.current
+                if (w != null && !hold) {
+                    val sig = GlanceCapsNotifications.weatherSignature(this, w, p)
+                    if (!weatherShown || sig != lastWeatherSig) {
+                        IslandPoster.post(this, GlanceCapsNotifications.ID_WEATHER, GlanceCapsNotifications.weather(this, w, p, !weatherShown && !resuming))
+                        lastWeatherSig = sig
+                        weatherShown = true
+                    }
                 }
+            } else {
+                if (weatherShown) nm.cancel(GlanceCapsNotifications.ID_WEATHER)
+                weatherShown = false
+                lastWeatherSig = ""
             }
-        } else {
-            if (weatherShown) nm.cancel(GlanceCapsNotifications.ID_WEATHER)
-            weatherShown = false
-            lastWeatherSig = ""
         }
 
-        if (p.weatherEnabled && p.alertsEnabled && p.weatherLat.isNotBlank()) {
-            AlertTracker.refresh(this, p)
-            val a = AlertTracker.current
-            if (a != null && !hold) {
-                val sig = GlanceCapsNotifications.alertSignature(a, p)
-                if (!alertShown || sig != lastAlertSig) {
-                    nm.notify(
-                        GlanceCapsNotifications.ID_ALERT,
-                        GlanceCapsNotifications.alert(this, a, p, expand = !alertShown || a.id != lastAlertId)
-                    )
-                    lastAlertSig = sig
-                    lastAlertId = a.id
-                    alertShown = true
+        guard("alerts") {
+            if (p.weatherEnabled && p.alertsEnabled && p.weatherLat.isNotBlank()) {
+                AlertTracker.refresh(this, p)
+                val a = AlertTracker.current
+                if (a != null && !hold) {
+                    val sig = GlanceCapsNotifications.alertSignature(a, p)
+                    if (!alertShown || sig != lastAlertSig) {
+                        IslandPoster.post(this, GlanceCapsNotifications.ID_ALERT,
+                            GlanceCapsNotifications.alert(this, a, p, expand = (!alertShown && !resuming) || a.id != lastAlertId)
+                        )
+                        lastAlertSig = sig
+                        lastAlertId = a.id
+                        alertShown = true
+                    }
+                } else if (a == null) {
+                    if (alertShown) nm.cancel(GlanceCapsNotifications.ID_ALERT)
+                    alertShown = false
+                    lastAlertSig = ""
+                    lastAlertId = ""
                 }
-            } else if (a == null) {
+            } else {
                 if (alertShown) nm.cancel(GlanceCapsNotifications.ID_ALERT)
                 alertShown = false
                 lastAlertSig = ""
                 lastAlertId = ""
             }
-        } else {
-            if (alertShown) nm.cancel(GlanceCapsNotifications.ID_ALERT)
-            alertShown = false
-            lastAlertSig = ""
-            lastAlertId = ""
         }
+
+        guard("pinned") { PinnedController.refresh(this) }
+
+        guard("update") {
+            UpdateChecker.refresh(this, p)
+            val u = UpdateChecker.available(this, p)
+            if (u != null && p.updateIsland && p.updateIslandShown != u.version) {
+                p.updateIslandShown = u.version
+                IslandPoster.post(this, GlanceCapsNotifications.ID_UPDATE, GlanceCapsNotifications.update(this, u.version, p))
+            }
+        }
+
+        resuming = false
+
+        guard("recover") { if (p.xmsfPending) ShizukuWorkaround.recover(this) }
 
         val sn = GlanceCapsNotifications.serviceNotification(this, p)
         val text = sn.extras.getCharSequence("android.text")?.toString() ?: ""
@@ -324,6 +399,9 @@ class GlanceCapsService : Service() {
             nm.cancel(GlanceCapsNotifications.ID_MATCH)
             nm.cancel(GlanceCapsNotifications.ID_WEATHER)
             nm.cancel(GlanceCapsNotifications.ID_ALERT)
+            nm.cancel(GlanceCapsNotifications.ID_UPDATE)
+            nm.cancel(GlanceCapsNotifications.ID_PINNED)
+            PinnedController.forget()
         } catch (e: Throwable) { }
         super.onDestroy()
     }
@@ -334,7 +412,7 @@ class GlanceCapsService : Service() {
             try {
                 val p = ModulePrefs(ctx)
                 val intent = Intent(ctx, GlanceCapsService::class.java)
-                if (p.chargingEnabled || p.tempEnabled || p.stepsEnabled || p.connEnabled || p.matchEnabled || p.weatherEnabled) {
+                if (p.chargingEnabled || p.tempEnabled || p.stepsEnabled || p.connEnabled || p.matchEnabled || p.weatherEnabled || p.pinnedEnabled) {
                     ContextCompat.startForegroundService(ctx, intent)
                 } else {
                     ctx.stopService(intent)

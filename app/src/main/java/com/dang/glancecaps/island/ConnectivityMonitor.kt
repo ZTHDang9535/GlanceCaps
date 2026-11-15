@@ -1,9 +1,14 @@
+@file:Suppress("DEPRECATION")
+
 package com.dang.glancecaps.island
 
 import android.Manifest
 import android.app.NotificationManager
 import android.bluetooth.BluetoothAdapter
 import android.bluetooth.BluetoothDevice
+import android.media.AudioManager
+import android.media.AudioDeviceInfo
+import android.bluetooth.BluetoothClass
 import android.bluetooth.BluetoothManager
 import android.content.BroadcastReceiver
 import android.content.Context
@@ -39,6 +44,10 @@ class ConnectivityMonitor(context: Context) {
     private var capSsid: String? = null
     private var ssidTries = 0
     private var cancelTask: Runnable? = null
+    private var lastBtAddress: String? = null
+    private var lastBtName: String? = null
+    private var lastBtAt = 0L
+    private val pendingBt = HashMap<String, Runnable>()
     private var networkCallback: ConnectivityManager.NetworkCallback? = null
 
     private val receiver = object : BroadcastReceiver() {
@@ -73,6 +82,9 @@ class ConnectivityMonitor(context: Context) {
                 addAction(WifiManager.WIFI_STATE_CHANGED_ACTION)
                 addAction(BluetoothAdapter.ACTION_STATE_CHANGED)
                 addAction(BluetoothDevice.ACTION_ACL_CONNECTED)
+                addAction(BluetoothDevice.ACTION_ACL_DISCONNECTED)
+                addAction(BluetoothAdapter.ACTION_CONNECTION_STATE_CHANGED)
+                addAction(WifiManager.NETWORK_STATE_CHANGED_ACTION)
                 addAction(Intent.ACTION_AIRPLANE_MODE_CHANGED)
             }
             ContextCompat.registerReceiver(ctx, receiver, filter, ContextCompat.RECEIVER_EXPORTED)
@@ -80,6 +92,11 @@ class ConnectivityMonitor(context: Context) {
             running = true
         } catch (e: Throwable) {
             CrashLog.append(ctx, "connectivity.start", e)
+            try { ctx.unregisterReceiver(receiver) } catch (t: Throwable) { }
+            try {
+                networkCallback?.let { ctx.getSystemService(ConnectivityManager::class.java).unregisterNetworkCallback(it) }
+            } catch (t: Throwable) { }
+            networkCallback = null
         }
     }
 
@@ -92,6 +109,7 @@ class ConnectivityMonitor(context: Context) {
         } catch (e: Throwable) { }
         networkCallback = null
         handler.removeCallbacksAndMessages(null)
+        pendingBt.clear()
         cancelTask = null
         try { ctx.getSystemService(NotificationManager::class.java).cancel(GlanceCapsNotifications.ID_CONN) } catch (e: Throwable) { }
     }
@@ -134,13 +152,25 @@ class ConnectivityMonitor(context: Context) {
             }
             BluetoothDevice.ACTION_ACL_CONNECTED -> {
                 if (!p.connBluetooth || !p.connShowNames || !hasBluetoothPermission()) return
-                val device: BluetoothDevice? = if (Build.VERSION.SDK_INT >= 33) {
-                    intent.getParcelableExtra(BluetoothDevice.EXTRA_DEVICE, BluetoothDevice::class.java)
-                } else {
-                    @Suppress("DEPRECATION")
-                    intent.getParcelableExtra(BluetoothDevice.EXTRA_DEVICE)
-                }
-                if (device != null) announceBluetooth(device, 0)
+                val device = deviceOf(intent) ?: return
+                scheduleBluetooth(device, 1500L)
+            }
+            BluetoothDevice.ACTION_ACL_DISCONNECTED -> {
+                val device = deviceOf(intent) ?: return
+                cancelBluetooth(device)
+            }
+            BluetoothAdapter.ACTION_CONNECTION_STATE_CHANGED -> {
+                if (!p.connBluetooth || !p.connShowNames || !hasBluetoothPermission()) return
+                val state = intent.getIntExtra(BluetoothAdapter.EXTRA_CONNECTION_STATE, -1)
+                if (state != BluetoothAdapter.STATE_CONNECTED) return
+                val device = deviceOf(intent) ?: return
+                scheduleBluetooth(device, 1500L)
+            }
+            WifiManager.NETWORK_STATE_CHANGED_ACTION -> {
+                if (!p.connWifi || !p.connShowNames) return
+                @Suppress("DEPRECATION")
+                val info = intent.getParcelableExtra<android.net.NetworkInfo>(WifiManager.EXTRA_NETWORK_INFO)
+                if (info?.isConnected == true && lastAirplane != true) scheduleSsid(350)
             }
             Intent.ACTION_AIRPLANE_MODE_CHANGED -> {
                 val on = intent.getBooleanExtra("state", false)
@@ -154,15 +184,100 @@ class ConnectivityMonitor(context: Context) {
         }
     }
 
+    private fun deviceOf(intent: Intent): BluetoothDevice? = if (Build.VERSION.SDK_INT >= 33) {
+        intent.getParcelableExtra(BluetoothDevice.EXTRA_DEVICE, BluetoothDevice::class.java)
+    } else {
+        @Suppress("DEPRECATION")
+        intent.getParcelableExtra(BluetoothDevice.EXTRA_DEVICE)
+    }
+
+    private fun addressOf(device: BluetoothDevice): String? = try {
+        device.address
+    } catch (e: Throwable) {
+        null
+    }
+
+    private fun cancelBluetooth(device: BluetoothDevice) {
+        val address = addressOf(device) ?: return
+        pendingBt.remove(address)?.let { handler.removeCallbacks(it) }
+    }
+
+    private fun scheduleBluetooth(device: BluetoothDevice, delayMs: Long) {
+        val address = addressOf(device) ?: return
+        val bonded = try {
+            device.bondState == BluetoothDevice.BOND_BONDED
+        } catch (e: Throwable) {
+            false
+        }
+        if (!bonded) return
+        cancelBluetooth(device)
+        val task = Runnable {
+            pendingBt.remove(address)
+            verifyBluetooth(device, 0)
+        }
+        pendingBt[address] = task
+        handler.postDelayed(task, delayMs)
+    }
+
+    private fun verifyBluetooth(device: BluetoothDevice, attempt: Int) {
+        try {
+            if (!hasBluetoothPermission()) return
+            val address = addressOf(device) ?: return
+            if (audioConnected(address)) {
+                announceBluetooth(device, 0)
+                return
+            }
+            val audioClass = try {
+                device.bluetoothClass?.majorDeviceClass == BluetoothClass.Device.Major.AUDIO_VIDEO
+            } catch (e: Throwable) {
+                false
+            }
+            val limit = if (audioClass) 3 else 1
+            if (attempt >= limit) {
+                if (!audioClass) announceBluetooth(device, 0)
+                return
+            }
+            val task = Runnable {
+                pendingBt.remove(address)
+                verifyBluetooth(device, attempt + 1)
+            }
+            pendingBt[address] = task
+            handler.postDelayed(task, if (audioClass) 1500L else 2000L)
+        } catch (e: Throwable) {
+            CrashLog.append(ctx, "connectivity.bluetooth.verify", e)
+        }
+    }
+
+    private fun audioConnected(address: String): Boolean = try {
+        ctx.getSystemService(AudioManager::class.java)
+            .getDevices(AudioManager.GET_DEVICES_OUTPUTS)
+            .any { isBluetoothAudio(it.type) && it.address.equals(address, ignoreCase = true) }
+    } catch (e: Throwable) {
+        false
+    }
+
+    private fun isBluetoothAudio(type: Int): Boolean =
+        type == AudioDeviceInfo.TYPE_BLUETOOTH_A2DP ||
+            type == AudioDeviceInfo.TYPE_BLUETOOTH_SCO ||
+            type == AudioDeviceInfo.TYPE_HEARING_AID ||
+            (Build.VERSION.SDK_INT >= 31 &&
+                (type == AudioDeviceInfo.TYPE_BLE_HEADSET || type == AudioDeviceInfo.TYPE_BLE_SPEAKER || type == AudioDeviceInfo.TYPE_BLE_BROADCAST))
+
     private fun announceBluetooth(device: BluetoothDevice, attempt: Int) {
         try {
             val p = ModulePrefs(ctx)
             if (!p.connBluetooth || !p.connShowNames || suppressed()) return
             val name = bluetoothName(device)
+            val address = try { device.address } catch (e: Throwable) { null }
             if (!name.isNullOrBlank()) {
+                val now = SystemClock.elapsedRealtime()
+                if (address != null && address == lastBtAddress && name == lastBtName && now - lastBtAt < 20_000L) return
+                lastBtAddress = address
+                lastBtName = name
+                lastBtAt = now
                 post(ConnKind.BLUETOOTH, true, name, p)
-            } else if (attempt < 4) {
-                handler.postDelayed({ announceBluetooth(device, attempt + 1) }, 700)
+            } else if (attempt < 8) {
+                handler.postDelayed({ announceBluetooth(device, attempt + 1) }, 600)
             }
         } catch (e: Throwable) {
             CrashLog.append(ctx, "connectivity.bluetooth", e)
@@ -188,6 +303,10 @@ class ConnectivityMonitor(context: Context) {
     private inner class LegacyCallback : ConnectivityManager.NetworkCallback() {
         override fun onAvailable(network: Network) {
             scheduleSsid(900)
+        }
+
+        override fun onCapabilitiesChanged(network: Network, caps: NetworkCapabilities) {
+            if (lastSsid == null) scheduleSsid(300)
         }
 
         override fun onLost(network: Network) {
@@ -237,7 +356,7 @@ class ConnectivityMonitor(context: Context) {
                 lastSsid = ssid
                 post(ConnKind.WIFI, true, ssid, p)
             }
-        } else if (++ssidTries < 10) {
+        } else if (++ssidTries < 20) {
             handler.postDelayed(ssidTask, 800)
         }
     }
@@ -274,11 +393,11 @@ class ConnectivityMonitor(context: Context) {
 
     private fun post(kind: ConnKind, on: Boolean, detail: String?, p: ModulePrefs) {
         val nm = ctx.getSystemService(NotificationManager::class.java)
-        nm.notify(GlanceCapsNotifications.ID_CONN, GlanceCapsNotifications.connectivity(ctx, kind, on, detail, p))
+        IslandPoster.post(ctx, GlanceCapsNotifications.ID_CONN, GlanceCapsNotifications.connectivity(ctx, kind, on, detail, p))
         cancelTask?.let { handler.removeCallbacks(it) }
         val task = Runnable { try { nm.cancel(GlanceCapsNotifications.ID_CONN) } catch (e: Throwable) { } }
         cancelTask = task
-        val hold = p.connSeconds.coerceIn(2, 10) * 1000L + 400L
+        val hold = GlanceCapsNotifications.connDurationMs(kind, on, detail, p) + 400L
         activeUntil = SystemClock.elapsedRealtime() + hold + 300L
         handler.postDelayed(task, hold)
     }

@@ -4,7 +4,6 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.compositionLocalOf
 import androidx.compose.ui.Modifier
@@ -20,7 +19,9 @@ private val moduleEntries = listOf(
     3 to "Steps",
     4 to "Connectivity",
     5 to "Matchday",
-    6 to "Weather"
+    6 to "Weather",
+    7 to "Pinned Island",
+    8 to "Calls"
 )
 
 @Composable

@@ -1,5 +1,6 @@
 package com.dang.glancecaps.ui
 
+import com.dang.glancecaps.island.CallAvatar
 import android.graphics.Bitmap
 import kotlin.math.roundToInt
 import androidx.compose.runtime.CompositionLocalProvider
@@ -25,24 +26,28 @@ import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.RowScope
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.material3.Icon
+import androidx.compose.material3.FilterChip
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.res.painterResource
+import androidx.compose.foundation.layout.width
+import com.dang.glancecaps.R
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -442,27 +447,193 @@ private fun TaxiCard(
 fun ConnectivityPreview(prefs: ModulePrefs, rev: Int) {
     val ctx = LocalContext.current
     val rows = ArrayList<Triple<ConnKind, Boolean, String?>>()
-    if (prefs.connWifi) rows.add(Triple(ConnKind.WIFI, true, if (prefs.connShowNames) "Home" else null))
-    if (prefs.connBluetooth) rows.add(Triple(ConnKind.BLUETOOTH, true, if (prefs.connShowNames) "Buds" else null))
+    if (prefs.connWifi) rows.add(Triple(ConnKind.WIFI, true, if (prefs.connShowNames) "Home Wi-Fi" else null))
+    if (prefs.connBluetooth) rows.add(Triple(ConnKind.BLUETOOTH, true, if (prefs.connShowNames) "Headphones" else null))
     if (prefs.connAirplane) rows.add(Triple(ConnKind.AIRPLANE, true, null))
     rows.forEach { (kind, on, detail) ->
         val bmp = remember(rev, kind) { GlanceCapsNotifications.connBitmap(ctx, kind, on) }
         val accent = Color(hex(GlanceCapsNotifications.connAccent(kind, on)))
+        val name = GlanceCapsNotifications.connName(kind, on, detail)
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .clip(RoundedCornerShape(30.dp))
+                .background(Color.Black)
+                .border(1.5.dp, accent.copy(alpha = 0.95f), RoundedCornerShape(30.dp))
+                .padding(horizontal = 16.dp, vertical = 10.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.SpaceBetween
+        ) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                GlyphIcon(bmp, 26.dp)
+                Spacer(Modifier.width(10.dp))
+                Text(
+                    GlanceCapsNotifications.connState(kind, on, name != null), color = Color.White,
+                    style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Medium
+                )
+            }
+            if (name != null) {
+                Text(name, color = Color.White.copy(alpha = 0.7f), style = MaterialTheme.typography.titleSmall)
+            }
+        }
+    }
+}
+
+@Composable
+fun PinnedPreview(prefs: ModulePrefs, rev: Int) {
+    val ctx = LocalContext.current
+    val bmp = remember(rev) { GlanceCapsNotifications.pinnedBitmap(ctx, prefs) }
+    val outline = remember(rev) {
+        try {
+            Color(android.graphics.Color.parseColor(prefs.pinnedColor.trim()))
+        } catch (e: Throwable) {
+            Color.Black
+        }
+    }
+    val side = prefs.pinnedTextSide
+    val text = if (prefs.pinnedShowText) prefs.pinnedText.trim() else ""
+    val text2 = if (prefs.pinnedShowText && side == 2) prefs.pinnedText2.trim() else ""
+    val shape = RoundedCornerShape(30.dp)
+    Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
+        Row(
+            modifier = Modifier
+                .clip(shape)
+                .background(Color.Black)
+                .then(if (GlanceCapsNotifications.useHyper(prefs)) Modifier.border(2.dp, outline, shape) else Modifier)
+                .padding(horizontal = 14.dp, vertical = 9.dp)
+                .widthIn(min = (if (prefs.pinnedPadAuto) 52 else prefs.pinnedPadLen * 11).dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.SpaceBetween
+        ) {
+            val iconSlot: @Composable () -> Unit = {
+                if (prefs.pinnedShowIcon) GlyphIcon(bmp, 26.dp) else Spacer(Modifier.size(26.dp))
+            }
+            val textSlot: @Composable (String) -> Unit = { t ->
+                androidx.compose.material3.Text(
+                    t, color = Color.White, maxLines = 1,
+                    style = MaterialTheme.typography.titleSmall
+                )
+            }
+            when {
+                text.isEmpty() && text2.isEmpty() -> iconSlot()
+                side == 0 -> {
+                    textSlot(text)
+                    Spacer(Modifier.width(14.dp))
+                    iconSlot()
+                }
+                side == 2 -> {
+                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                        iconSlot()
+                        if (text.isNotEmpty()) textSlot(text)
+                    }
+                    Spacer(Modifier.width(14.dp))
+                    if (text2.isNotEmpty()) textSlot(text2)
+                }
+                else -> {
+                    iconSlot()
+                    Spacer(Modifier.width(14.dp))
+                    textSlot(text)
+                }
+            }
+        }
+    }
+}
+
+@Composable
+fun UpdatePreview(version: String) {
+    val ctx = LocalContext.current
+    val bmp = remember { GlanceCapsNotifications.appIconBitmap(ctx) }
+    PillShell(Color(0xFF3D8BFF)) {
+        GlyphIcon(bmp, 26.dp)
+        Text(
+            GlanceCapsNotifications.updateLabel(version), color = Color.White,
+            style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Medium
+        )
+    }
+}
+
+private fun hexColor(hex: String, fallback: Color): Color = try {
+    Color(android.graphics.Color.parseColor(hex.trim()))
+} catch (e: Throwable) {
+    fallback
+}
+
+@Composable
+fun CallPreview(prefs: ModulePrefs, rev: Int) {
+    val ctx = LocalContext.current
+    val green = remember(rev) { IslandIcons.flat(ctx, R.drawable.ic_call, android.graphics.Color.parseColor("#22C841")) }
+    val avatar = remember(rev) { if (prefs.callShowAvatar) CallAvatar.placeholder(ctx, "Contact name", prefs) else null }
+    var incoming by remember { mutableStateOf(false) }
+    val status = if (incoming) {
+        prefs.callTextIncoming.trim().take(16).ifEmpty { "Incoming call" }
+    } else {
+        prefs.callTextOutgoing.trim().take(16).ifEmpty { "Calling..." }
+    }
+    Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(14.dp)) {
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.Center) {
+            FilterChip(selected = !incoming, onClick = { incoming = false }, label = { Text("Outgoing") })
+            Spacer(Modifier.width(8.dp))
+            FilterChip(selected = incoming, onClick = { incoming = true }, label = { Text("Incoming") })
+        }
         Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
             Row(
                 modifier = Modifier
                     .clip(RoundedCornerShape(30.dp))
                     .background(Color.Black)
-                    .border(1.5.dp, accent.copy(alpha = 0.95f), RoundedCornerShape(30.dp))
                     .padding(horizontal = 14.dp, vertical = 9.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(36.dp)
+            ) {
+                GlyphIcon(avatar ?: green, 26.dp)
+                androidx.compose.material3.Text(status, color = Color.White, style = MaterialTheme.typography.titleMedium)
+            }
+        }
+        if (prefs.callButtons) {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(34.dp))
+                    .background(Color(0xFF1E2229))
+                    .padding(start = 18.dp, end = 14.dp, top = 14.dp, bottom = 14.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                GlyphIcon(bmp, 26.dp)
-                Spacer(Modifier.width(12.dp))
-                Text(
-                    GlanceCapsNotifications.connText(kind, on, detail), color = accent,
-                    style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold
-                )
+                if (avatar != null) {
+                    GlyphIcon(avatar, 46.dp)
+                    Spacer(Modifier.width(12.dp))
+                }
+                Column(Modifier.weight(1f)) {
+                    Text("Contact name", color = Color.White, style = MaterialTheme.typography.titleMedium)
+                    androidx.compose.material3.Text(status, color = Color(0xFF9AA0B4), style = MaterialTheme.typography.bodyMedium)
+                }
+                if (incoming) {
+                    Box(
+                        Modifier.size(46.dp).clip(CircleShape).background(hexColor(prefs.callColorEnd, Color(0xFFFF3B30))),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Icon(painterResource(R.drawable.ic_call_end), contentDescription = null, tint = Color.White, modifier = Modifier.size(22.dp))
+                    }
+                    Spacer(Modifier.width(10.dp))
+                    Box(
+                        Modifier.size(46.dp).clip(CircleShape).background(hexColor(prefs.callColorAnswer, Color(0xFF22C841))),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Icon(painterResource(R.drawable.ic_call), contentDescription = null, tint = Color.White, modifier = Modifier.size(22.dp))
+                    }
+                } else {
+                    Box(
+                        Modifier.size(46.dp).clip(CircleShape).background(hexColor(prefs.callColorSpeaker, Color(0xFF3A3F52))),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Icon(painterResource(R.drawable.ic_volume_up), contentDescription = null, tint = Color.White, modifier = Modifier.size(22.dp))
+                    }
+                    Spacer(Modifier.width(10.dp))
+                    Box(
+                        Modifier.size(46.dp).clip(CircleShape).background(hexColor(prefs.callColorEnd, Color(0xFFFF3B30))),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Icon(painterResource(R.drawable.ic_call_end), contentDescription = null, tint = Color.White, modifier = Modifier.size(22.dp))
+                    }
+                }
             }
         }
     }

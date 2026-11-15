@@ -30,6 +30,13 @@ object IslandPadding {
         text.put("title", if (leading) filler + title else title + filler)
     }
 
+    fun center(text: String, units: Int): String {
+        val extra = units - text.length
+        if (extra <= 0) return text
+        val left = extra / 2
+        return FIG.repeat(left) + text + FIG.repeat(extra - left)
+    }
+
     fun apply(big: JSONObject, auto: Boolean, length: Int) {
         if (auto) return
         val left = big.optJSONObject("imageTextInfoLeft") ?: return

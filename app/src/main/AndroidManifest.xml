@@ -15,6 +15,7 @@
     <uses-permission android:name="android.permission.ACCESS_WIFI_STATE" />
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
     <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
+    <uses-permission android:name="android.permission.ACCESS_BACKGROUND_LOCATION" />
     <uses-permission android:name="android.permission.BLUETOOTH_CONNECT" />
     <uses-permission android:name="android.permission.BLUETOOTH" android:maxSdkVersion="30" />
     <uses-permission
@@ -24,8 +25,11 @@
     <queries>
         <provider android:authorities="miui.statusbar.notification.public" />
         <provider android:authorities="com.miui.providers.steps" />
-        <provider android:authorities="weather" />
-        <package android:name="com.miui.weather2" />
+        <intent>
+            <action android:name="android.intent.action.MAIN" />
+            <category android:name="android.intent.category.LAUNCHER" />
+        </intent>
+        <package android:name="moe.shizuku.privileged.api" />
         <package android:name="com.google.android.apps.healthdata" />
         <package android:name="com.xiaomi.wearable" />
         <package android:name="com.xiaomi.hm.health" />
@@ -42,7 +46,8 @@
 
         <activity
             android:name=".MainActivity"
-            android:exported="true">
+            android:exported="true"
+            android:windowSoftInputMode="adjustResize">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
@@ -72,6 +77,20 @@
             android:name=".island.MatchCloseReceiver"
             android:exported="false" />
 
+        <receiver
+            android:name=".call.CallActionReceiver"
+            android:exported="false" />
+
+        <service
+            android:name=".island.IslandListenerService"
+            android:exported="true"
+            android:label="GlanceCaps"
+            android:permission="android.permission.BIND_NOTIFICATION_LISTENER_SERVICE">
+            <intent-filter>
+                <action android:name="android.service.notification.NotificationListenerService" />
+            </intent-filter>
+        </service>
+
         <service
             android:name=".island.GlanceCapsService"
             android:exported="false"
@@ -80,6 +99,14 @@
                 android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
                 android:value="Live battery charging, temperature, step and connectivity status shown in the HyperOS island" />
         </service>
+
+        <provider
+            android:name="rikka.shizuku.ShizukuProvider"
+            android:authorities="${applicationId}.shizuku"
+            android:multiprocess="false"
+            android:enabled="true"
+            android:exported="true"
+            android:permission="android.permission.INTERACT_ACROSS_USERS_FULL" />
 
         <receiver
             android:name=".island.BootReceiver"

@@ -15,6 +15,27 @@ jobs:
           distribution: temurin
           java-version: 17
 
+      - uses: actions/cache@v4
+        with:
+          path: |
+            ~/.gradle/wrapper
+            ~/.gradle/caches
+          key: gradle-${{ runner.os }}-${{ hashFiles('**/*.gradle*', 'gradle/wrapper/gradle-wrapper.properties') }}
+          restore-keys: |
+            gradle-${{ runner.os }}-
+
+      - name: Prepare Gradle
+        run: |
+          chmod +x gradlew
+          for base in https://services.gradle.org/distributions https://mirrors.cloud.tencent.com/gradle https://repo.huaweicloud.com/gradle; do
+            sed -i "s#^distributionUrl=.*#distributionUrl=${base}/gradle-8.9-bin.zip#" gradle/wrapper/gradle-wrapper.properties
+            for i in 1 2; do
+              ./gradlew --version --no-daemon && exit 0
+              sleep 10
+            done
+          done
+          exit 1
+
       - name: Accept Android SDK licenses
         run: yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --licenses > /dev/null || true
 

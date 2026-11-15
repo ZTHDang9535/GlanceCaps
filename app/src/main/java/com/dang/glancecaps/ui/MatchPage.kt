@@ -18,7 +18,6 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -39,6 +38,7 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.dang.glancecaps.R
+import com.dang.glancecaps.i18n.Lang
 import com.dang.glancecaps.data.ModulePrefs
 import com.dang.glancecaps.island.GlanceCapsNotifications
 import com.dang.glancecaps.match.MatchApi
@@ -55,7 +55,7 @@ import java.util.Date
 import java.util.Locale
 
 private fun kickoffText(m: MatchInfo): String =
-    SimpleDateFormat("EEE d MMM, HH:mm", Locale.getDefault()).format(Date(m.kickoff))
+    SimpleDateFormat("EEE d MMM, HH:mm", Lang.locale).format(Date(m.kickoff))
 
 private fun statusText(m: MatchInfo): String = when (m.state) {
     "in" -> m.detail.ifBlank { "Live" }
@@ -67,7 +67,7 @@ private fun dayLabel(offset: Int): String = when (offset) {
     0 -> "Today"
     1 -> "Tomorrow"
     -1 -> "Yesterday"
-    else -> LocalDate.now().plusDays(offset.toLong()).format(DateTimeFormatter.ofPattern("EEE d MMM", Locale.getDefault()))
+    else -> LocalDate.now().plusDays(offset.toLong()).format(DateTimeFormatter.ofPattern("EEE d MMM", Lang.locale))
 }
 
 @Composable
@@ -77,6 +77,7 @@ fun MatchPage(prefs: ModulePrefs, onBack: () -> Unit, onChanged: () -> Unit) {
     var dayOffset by remember { mutableIntStateOf(0) }
     var source by remember { mutableStateOf(prefs.matchSource) }
     var apiKey by remember { mutableStateOf(prefs.matchApiKey) }
+    var fdKey by remember { mutableStateOf(prefs.matchFdKey) }
     var browse by remember { mutableStateOf(prefs.matchBrowse) }
     var selected by remember { mutableStateOf(prefs.matchId) }
     var picked by remember { mutableStateOf(MatchTracker.current?.takeIf { it.id == prefs.matchId }) }
@@ -87,9 +88,10 @@ fun MatchPage(prefs: ModulePrefs, onBack: () -> Unit, onChanged: () -> Unit) {
     var rev by remember { mutableIntStateOf(0) }
     val bump: () -> Unit = { rev++; onChanged() }
 
-    LaunchedEffect(dayOffset, reload, source, apiKey) {
+    LaunchedEffect(dayOffset, reload, source, apiKey, fdKey) {
         loading = true
-        if (MatchSources.needsKey(source) && apiKey.isBlank()) {
+        val sourceKey = if (source == MatchSources.FOOTBALLDATA) fdKey else apiKey
+        if (MatchSources.needsKey(source) && sourceKey.isBlank()) {
             matches = emptyList()
             failed = false
             loading = false
@@ -97,7 +99,7 @@ fun MatchPage(prefs: ModulePrefs, onBack: () -> Unit, onChanged: () -> Unit) {
         }
         delay(if (MatchSources.needsKey(source)) 700L else 0L)
         val day = LocalDate.now().plusDays(dayOffset.toLong())
-        val result = withContext(Dispatchers.IO) { MatchApi.fetchLocalDay(day, source, apiKey) }
+        val result = withContext(Dispatchers.IO) { MatchApi.fetchLocalDay(day, source, apiKey, fdKey) }
         failed = result == null
         matches = result ?: emptyList()
         loading = false
@@ -154,14 +156,19 @@ fun MatchPage(prefs: ModulePrefs, onBack: () -> Unit, onChanged: () -> Unit) {
                 RowDivider()
                 Column(Modifier.padding(horizontal = 16.dp, vertical = 12.dp)) {
                     OutlinedTextField(
-                        value = apiKey,
+                        value = if (source == MatchSources.FOOTBALLDATA) fdKey else apiKey,
                         onValueChange = {
-                            apiKey = it
-                            prefs.matchApiKey = it.trim()
+                            if (source == MatchSources.FOOTBALLDATA) {
+                                fdKey = it
+                                prefs.matchFdKey = it.trim()
+                            } else {
+                                apiKey = it
+                                prefs.matchApiKey = it.trim()
+                            }
                             MatchTracker.reset()
                         },
                         singleLine = true,
-                        placeholder = { Text("API key") },
+                        placeholder = { Text(if (source == MatchSources.FOOTBALLDATA) "football-data.org token" else "API key") },
                         modifier = Modifier.fillMaxWidth()
                     )
                 }
@@ -192,7 +199,7 @@ fun MatchPage(prefs: ModulePrefs, onBack: () -> Unit, onChanged: () -> Unit) {
                 failed -> RowItem(
                     icon = null,
                     title = "Could not load matches",
-                    subtitle = "Tap to retry or change the source",
+                    subtitle = if (MatchApi.lastError.isBlank()) "Tap to retry or change the source" else MatchApi.lastError + "  -  tap to retry",
                     onClick = { Haptics.tick(view); reload++ }
                 )
                 shown.isEmpty() -> RowItem(icon = null, title = "No matches", subtitle = null)

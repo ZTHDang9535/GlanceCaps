@@ -15,26 +15,32 @@ object EspnApi {
     private class League(val slug: String, val country: String, val name: String)
 
     private val leagues = listOf(
-        League("vie.1", "Vietnam", "V.League 1"),
-        League("aff.championship", "", "ASEAN Championship"),
         League("eng.1", "England", "Premier League"),
-        League("eng.2", "England", "Championship"),
-        League("eng.3", "England", "League One"),
-        League("eng.4", "England", "League Two"),
-        League("eng.fa", "England", "FA Cup"),
-        League("eng.league_cup", "England", "EFL Cup"),
         League("esp.1", "Spain", "LaLiga"),
         League("ita.1", "Italy", "Serie A"),
         League("ger.1", "Germany", "Bundesliga"),
-        League("fifa.world", "", "FIFA World Cup"),
-        League("fifa.worldq.afc", "", "World Cup Qualification AFC"),
-        League("fifa.worldq.uefa", "", "World Cup Qualification UEFA"),
+        League("fra.1", "France", "Ligue 1"),
         League("uefa.champions", "", "UEFA Champions League"),
         League("uefa.europa", "", "UEFA Europa League"),
         League("uefa.europa.conf", "", "UEFA Conference League"),
+        League("fifa.world", "", "FIFA World Cup"),
+        League("fifa.worldq.uefa", "", "World Cup Qualification UEFA"),
         League("uefa.euro", "", "UEFA Euro"),
         League("uefa.nations", "", "UEFA Nations League"),
-        League("afc.asian.cup", "", "AFC Asian Cup")
+        League("conmebol.america", "", "Copa America"),
+        League("eng.fa", "England", "FA Cup"),
+        League("eng.league_cup", "England", "EFL Cup"),
+        League("esp.copa_del_rey", "Spain", "Copa del Rey"),
+        League("ita.coppa_italia", "Italy", "Coppa Italia"),
+        League("ger.dfb_pokal", "Germany", "DFB-Pokal"),
+        League("fra.coupe_de_france", "France", "Coupe de France"),
+        League("eng.2", "England", "Championship"),
+        League("ned.1", "Netherlands", "Eredivisie"),
+        League("por.1", "Portugal", "Primeira Liga"),
+        League("sau.1", "Saudi Arabia", "Saudi Pro League"),
+        League("usa.1", "", "MLS"),
+        League("conmebol.libertadores", "", "Copa Libertadores"),
+        League("fifa.friendly", "", "International Friendly")
     )
 
     private val basic: DateTimeFormatter = DateTimeFormatter.BASIC_ISO_DATE
@@ -42,13 +48,17 @@ object EspnApi {
     private fun range(center: LocalDate): String =
         basic.format(center.minusDays(1)) + "-" + basic.format(center.plusDays(1))
 
+    private fun scoreboard(slug: String, center: LocalDate): String? =
+        MatchApi.get("$BASE/$slug/scoreboard?dates=${range(center)}&limit=200")
+            ?: MatchApi.get("$BASE/$slug/scoreboard?dates=${basic.format(center)}&limit=200")
+            ?: if (center == LocalDate.now()) MatchApi.get("$BASE/$slug/scoreboard") else null
+
     fun fetchDay(day: LocalDate): List<MatchInfo>? {
-        val dates = range(day)
         val pool = Executors.newFixedThreadPool(8)
         val all = ArrayList<MatchInfo>()
         var ok = false
         try {
-            val futures = leagues.map { l -> pool.submit(Callable<List<MatchInfo>?> { fetchLeague(l, dates) }) }
+            val futures = leagues.map { l -> pool.submit(Callable<List<MatchInfo>?> { fetchLeague(l, day) }) }
             for (f in futures) {
                 val r = try {
                     f.get()
@@ -79,7 +89,7 @@ object EspnApi {
         } catch (e: Throwable) {
             return null
         }
-        val body = MatchApi.get("$BASE/$slug/scoreboard?dates=${range(center)}&limit=200") ?: return null
+        val body = scoreboard(slug, center) ?: return null
         return try {
             val events = JSONObject(body).optJSONArray("events") ?: return null
             for (i in 0 until events.length()) {
@@ -92,8 +102,8 @@ object EspnApi {
         }
     }
 
-    private fun fetchLeague(l: League, dates: String): List<MatchInfo>? {
-        val body = MatchApi.get("$BASE/${l.slug}/scoreboard?dates=$dates&limit=200") ?: return null
+    private fun fetchLeague(l: League, center: LocalDate): List<MatchInfo>? {
+        val body = scoreboard(l.slug, center) ?: return null
         return try {
             val events = JSONObject(body).optJSONArray("events") ?: return emptyList()
             val out = ArrayList<MatchInfo>()

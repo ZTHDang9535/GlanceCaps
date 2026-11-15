@@ -45,9 +45,9 @@ object DiscordProfiles {
         }
     }
 
-    fun fetch(): Profile? {
-        if (USER_ID.isBlank()) return null
-        return fetchDstn() ?: fetchLookup()
+    fun fetch(userId: String = USER_ID): Profile? {
+        if (userId.isBlank()) return null
+        return fetchDstn(userId) ?: fetchLookup(userId)
     }
 
     private fun color(hex: String?): Int? {
@@ -59,8 +59,8 @@ object DiscordProfiles {
         }
     }
 
-    private fun fetchDstn(): Profile? {
-        val body = get("https://dcdn.dstn.to/profile/$USER_ID") ?: return null
+    private fun fetchDstn(userId: String): Profile? {
+        val body = get("https://dcdn.dstn.to/profile/$userId") ?: return null
         return try {
             val root = JSONObject(body)
             val user = root.optJSONObject("user") ?: return null
@@ -74,8 +74,8 @@ object DiscordProfiles {
                 username = username,
                 pronouns = profile?.optString("pronouns").orEmpty(),
                 bio = profile?.optString("bio").orEmpty(),
-                avatarUrl = if (avatar.isBlank() || avatar == "null") "" else "https://cdn.discordapp.com/avatars/$USER_ID/$avatar.png?size=256",
-                bannerUrl = if (banner.isBlank() || banner == "null") "" else "https://cdn.discordapp.com/banners/$USER_ID/$banner.png?size=600",
+                avatarUrl = if (avatar.isBlank() || avatar == "null") "" else "https://cdn.discordapp.com/avatars/$userId/$avatar.png?size=256",
+                bannerUrl = if (banner.isBlank() || banner == "null") "" else "https://cdn.discordapp.com/banners/$userId/$banner.png?size=600",
                 bannerColor = color(user.optString("banner_color")) ?: accent?.let { 0xFF000000.toInt() or it }
             )
         } catch (e: Throwable) {
@@ -83,8 +83,8 @@ object DiscordProfiles {
         }
     }
 
-    private fun fetchLookup(): Profile? {
-        val body = get("https://discordlookup.mesalytic.moe/v1/user/$USER_ID") ?: return null
+    private fun fetchLookup(userId: String): Profile? {
+        val body = get("https://discordlookup.mesalytic.moe/v1/user/$userId") ?: return null
         return try {
             val root = JSONObject(body)
             val username = root.optString("username")

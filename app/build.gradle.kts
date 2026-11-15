@@ -12,14 +12,27 @@ android {
         applicationId = "com.dang.glancecaps"
         minSdk = 29
         targetSdk = 35
-        versionCode = 1
-        versionName = "1.0.0"
+        versionCode = 4
+        versionName = "1.1.2"
+    }
+
+    signingConfigs {
+        create("glancecaps") {
+            storeFile = file("glancecaps.p12")
+            storeType = "pkcs12"
+            storePassword = "glancecaps"
+            keyAlias = "glancecaps"
+            keyPassword = "glancecaps"
+        }
     }
 
     buildTypes {
+        debug {
+            signingConfig = signingConfigs.getByName("glancecaps")
+        }
         release {
             isMinifyEnabled = false
-            signingConfig = signingConfigs.getByName("debug")
+            signingConfig = signingConfigs.getByName("glancecaps")
         }
     }
     compileOptions {
@@ -31,6 +44,8 @@ android {
 }
 
 dependencies {
+    implementation("dev.rikka.shizuku:api:13.1.5")
+    implementation("dev.rikka.shizuku:provider:13.1.5")
     val composeBom = platform("androidx.compose:compose-bom:2024.12.01")
     implementation(composeBom)
     implementation("androidx.core:core-ktx:1.15.0")
